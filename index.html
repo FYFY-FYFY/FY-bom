@@ -390,7 +390,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 <!-- Tabs -->
 <div class="tabs">
   <div class="tab active" data-tab="products">📋 产品总览 <span class="badge" id="tabBadgeProducts">55</span></div>
-  <div class="tab" data-tab="keymaterials">⭐ 关键物料 <span class="badge" id="tabBadgeKey">0</span></div>
+  <div class="tab" data-tab="keymaterials">⭐ 关键物料 <span class="badge" id="tabBadgeKey">13</span></div>
   <div class="tab" data-tab="search">🔍 搜索对比</div>
   <div class="tab" data-tab="changes">🔄 物料变更 <span class="badge danger" id="tabBadgeChanges">0</span></div>
   <div class="tab" data-tab="batch">📝 批量录入</div>
@@ -793,12 +793,7 @@ async function syncToOnline() {
     alert('✅ 同步完成！\n\n同事访问地址：\n' + url + '\n\n访问密码：' + (cfg.password || 'bom2026') + '\n（请勿泄露密码；同事打开后输入密码即可查看，你重新点上传同步他们刷新即见最新）');
   } catch (e) {
     closeSyncStatus();
-    const msg = (e && e.message ? e.message : String(e));
-    if (/401|credential|凭据|无效|Bad cred/i.test(msg)) {
-      alert('❌ 同步失败：Token 无效或已过期（凭据无效）。\n\n请点右上角"设置"，清空 Token 输入框，重新粘贴最新的 Token（首尾不要有多余空格/换行），点"保存"后再试。');
-    } else {
-      alert('❌ 同步失败：' + msg + '\n\n请检查：GitHub 用户名 / 仓库名 / Token(需 repo 权限) 是否正确，网络是否连通。');
-    }
+    alert('❌ 同步失败：' + (e && e.message ? e.message : e) + '\n\n请检查：GitHub 用户名 / 仓库名 / Token(需 repo 权限) 是否正确，网络是否连通。');
   }
 }
 
