@@ -1802,13 +1802,13 @@ function renderBOMTable(product, calc) {
   let h = '<div class="bom-tree-wrap"><table class="bom-table"><colgroup>';
   h += '<col style="width:50px;"><col style="width:60px;"><col style="width:135px;"><col style="width:80px;">';
   h += '<col style="width:170px;"><col style="width:48px;"><col style="width:50px;"><col style="width:58px;">';
-  h += '<col style="width:68px;"><col style="width:68px;"><col style="width:100px;"><col style="width:60px;">';
-  h += '<col style="width:68px;"><col style="width:48px;"><col style="width:38px;">';
+  h += '<col style="width:38px;"><col style="width:68px;"><col style="width:68px;"><col style="width:100px;">';
+  h += '<col style="width:60px;"><col style="width:68px;"><col style="width:48px;">';
   h += '</colgroup><thead><tr>';
   h += '<th>展开</th><th>层级</th><th>物料编码</th><th>名称</th>';
   h += '<th>规格型号</th><th>属性</th><th>类型</th><th>用量</th>';
-  h += '<th>库存</th><th>在途</th><th>到货日期</th>';
-  h += '<th>可产</th><th>含在途</th><th>状态</th><th>🔑</th>';
+  h += '<th>🔑</th><th>库存</th><th>在途</th><th>到货日期</th>';
+  h += '<th>可产</th><th>含在途</th><th>状态</th>';
   h += '</tr></thead><tbody>';
   tree.children.forEach(child => { h += renderBOMRow(child, product.code, 1, bottleneckSet); });
   h += '</tbody></table></div>';
@@ -1859,13 +1859,13 @@ function renderBOMRow(node, pCode, depth, bottleneckSet) {
       <td>标准+替代合并</td>
       <td></td><td></td>
       <td class="num-cell">${node.materials[0].sq}</td>
+      <td></td>
       <td class="num-cell" style="${STOCK_LEVEL_STYLE[gLvl]}">${gStock}</td>
       <td class="num-cell ${gTransit>0?'warn':''}">${gTransit}</td>
       <td></td>
       <td class="num-cell ${gp>0?'success':'danger'}">${gp}</td>
       <td class="num-cell ${ga>gp?'warn':(ga>0?'success':'danger')}">${ga}</td>
       <td>${gStock>0?'<span style="color:var(--success);font-size:10px;">✓</span>':(gStock+gTransit>0?'<span style="color:var(--warning);font-size:10px;">在途</span>':'<span style="color:var(--danger);font-size:10px;">✗</span>')}</td>
-      <td></td>
     </tr>`;
   }
 
@@ -1905,13 +1905,13 @@ function renderBOMRow(node, pCode, depth, bottleneckSet) {
       <td><span class="attr-tag ${mat.a}">${mat.a}</span></td>
       <td>${mat.it?`<span class="type-tag ${mat.it}">${mat.it}</span>`:''}</td>
       <td class="num-cell">${isV?'<span style="color:var(--purple)">0</span>':mat.sq}</td>
+      <td><span class="key-star ${isKey?'active':''}" onclick="event.stopPropagation();toggleKey('${mat.c}')" title="${isKey?'取消关键物料':'标记关键物料'}">${isKey?'★':'☆'}</span></td>
       <td><input class="${stockCls}" type="number" min="0" value="${ms||''}" placeholder="0" style="${boxStyle}" onchange="updateInv('${mat.c}','stock',this.value)"></td>
       <td><input class="${stockCls}" type="number" min="0" value="${mt||''}" placeholder="0" onchange="updateInv('${mat.c}','transit',this.value)"></td>
       <td><input class="date-input" type="date" value="${ma}" onchange="updateInv('${mat.c}','arrival',this.value)"></td>
       <td class="num-cell ${mpn>0?'success':'danger'}">${mpn||0}</td>
       <td class="num-cell ${mpa>mpn?'warn':(mpa>0?'success':'danger')}">${mpa||0}</td>
       <td>${stH}</td>
-      <td><span class="key-star ${isKey?'active':''}" onclick="event.stopPropagation();toggleKey('${mat.c}')" title="${isKey?'取消关键物料':'标记关键物料'}">${isKey?'★':'☆'}</span></td>
     </tr>`;
   });
 
