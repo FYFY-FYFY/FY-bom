@@ -1,4 +1,6 @@
-<html lang="zh-CN"><head>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BOM 库存与产能管理工具</title>
@@ -544,9 +546,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <p><code>物料编码</code> Tab <code>库存</code> Tab <code>在途</code> Tab <code>到货日期</code> Tab <code>单价</code></p>
       <p style="margin-top:4px;">可直接从 Excel 粘贴数据。也支持只填编码+库存两列。</p>
     </div>
-    <textarea id="batchInput" placeholder="示例：
-1.1.07.0502	100	50	2025-08-15	0.5
-2.2.0499.171	200	100	2025-08-18	15"></textarea>
+    <textarea id="batchInput" placeholder="示例：&#10;1.1.07.0502&#9;100&#9;50&#9;2025-08-15&#9;0.5&#10;2.2.0499.171&#9;200&#9;100&#9;2025-08-18&#9;15"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImport()">导入</button>
       <button class="btn" onclick="document.getElementById('batchInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -560,9 +560,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <p>每行一条：<code>成品编码</code> Tab <code>内部型号</code></p>
       <p style="margin-top:4px;">更新BOM后内部型号数据保留。</p>
     </div>
-    <textarea id="internalModelInput" placeholder="示例：
-HMICTAI508000001	T508-20-80
-HMICTAI7121VX500104	T7121-VX5"></textarea>
+    <textarea id="internalModelInput" placeholder="示例：&#10;HMICTAI508000001&#9;T508-20-80&#10;HMICTAI7121VX500104&#9;T7121-VX5"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImportInternalModels()">导入内部型号</button>
       <button class="btn" onclick="document.getElementById('internalModelInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -575,9 +573,7 @@ HMICTAI7121VX500104	T7121-VX5"></textarea>
       <p>每行一条：<code>成品编码</code> Tab <code>商务特性</code></p>
       <p style="margin-top:4px;">商务特性如：量产物料、试产物料、停产物料等。更新BOM后数据保留。</p>
     </div>
-    <textarea id="bizTraitsInput" placeholder="示例：
-HMICTAI508000001	量产物料
-HMICTAI7121VX500104	试产物料"></textarea>
+    <textarea id="bizTraitsInput" placeholder="示例：&#10;HMICTAI508000001&#9;量产物料&#10;HMICTAI7121VX500104&#9;试产物料"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImportBizTraits()">导入商务特性</button>
       <button class="btn" onclick="document.getElementById('bizTraitsInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -2336,10 +2332,11 @@ function batchImportInternalModels() {
   const lines = text.split('\n').filter(l => l.trim());
   let ok = 0, fail = 0;
   lines.forEach((line, i) => {
-    const p = line.split(/[\t,，]/).map(s => s.trim());
-    if (p.length < 2) { fail++; return; }
-    const code = p[0];
-    const model = p[1];
+    // 第一个空白分隔段为编码，剩余全部为型号（型号里可能含逗号，如"RK3568，2G+8G存储"）
+    const m = line.match(/^(\S+)\s+(.+)$/);
+    if (!m) { fail++; return; }
+    const code = m[1];
+    const model = m[2].trim();
     if (!model) { fail++; return; }
     internalModels[code] = model;
     ok++;
@@ -2356,10 +2353,11 @@ function batchImportBizTraits() {
   const lines = text.split('\n').filter(l => l.trim());
   let ok = 0, fail = 0;
   lines.forEach((line, i) => {
-    const p = line.split(/[\t,，]/).map(s => s.trim());
-    if (p.length < 2) { fail++; return; }
-    const code = p[0];
-    const trait = p[1];
+    // 第一个空白分隔段为编码，剩余全部为特性（特性描述里可能含逗号）
+    const m = line.match(/^(\S+)\s+(.+)$/);
+    if (!m) { fail++; return; }
+    const code = m[1];
+    const trait = m[2].trim();
     if (!trait) { fail++; return; }
     businessTraits[code] = trait;
     ok++;
@@ -2650,5 +2648,5 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 </script>
-
-</body></html>
+</body>
+</html>
