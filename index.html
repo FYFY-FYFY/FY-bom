@@ -314,6 +314,23 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .filter-bar label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
 .filter-bar input[type="checkbox"] { width: 15px; height: 15px; }
 
+/* Advanced search panel */
+.search-panel { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.search-panel .sp-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.search-panel .sp-title { font-size: 13px; font-weight: 700; }
+.search-panel .sp-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+.search-panel select, .search-panel input[type="text"] { padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 7px; font-size: 12px; outline: none; background: var(--card-bg); }
+.search-panel select:focus, .search-panel input[type="text"]:focus { border-color: var(--primary); }
+.search-panel #searchScheme { min-width: 170px; }
+#searchConditions { display: flex; flex-direction: column; gap: 6px; }
+.sc-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sc-row .sc-field { min-width: 110px; }
+.sc-row .sc-op { min-width: 86px; }
+.sc-row .sc-val { flex: 1; min-width: 180px; }
+.sc-row .sc-del { width: 26px; height: 26px; border: none; border-radius: 6px; background: var(--danger-light, #fef2f2); color: var(--danger, #b91c1c); font-size: 14px; cursor: pointer; line-height: 1; }
+.sc-row .sc-del:hover { background: var(--danger, #b91c1c); color: #fff; }
+.sc-and { font-size: 11px; color: var(--text-muted); padding: 0 2px; }
+
 /* Toast */
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 10000; animation: slideIn 0.3s ease; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -410,8 +427,19 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 
 <!-- Tab: Products -->
 <div class="tab-content active" id="tab-products">
+  <div class="search-panel" id="searchPanel">
+    <div class="sp-head">
+      <span class="sp-title">🔎 搜索方案</span>
+      <select id="searchScheme" onchange="loadScheme(this.value)"></select>
+      <button class="btn btn-sm btn-primary" onclick="saveCurrentScheme()">💾 保存方案</button>
+      <button class="btn btn-sm" onclick="deleteSelectedScheme()">🗑 删除方案</button>
+      <button class="btn btn-sm" onclick="addSearchCondition()">＋ 添加条件</button>
+      <button class="btn btn-sm" onclick="resetSearchConditions()">清空条件</button>
+      <span class="sp-hint">多条件需同时满足 | 等于/不等于为完全匹配(忽略大小写) | 默认包含</span>
+    </div>
+    <div id="searchConditions"></div>
+  </div>
   <div class="filter-bar">
-    <input type="text" id="productFilter" placeholder="筛选成品编码/名称/规格..." oninput="renderProducts()" style="width:280px;">
     <select id="filterAttr" onchange="renderProducts()">
       <option value="">全部属性</option><option value="自制">自制</option><option value="委外">委外</option><option value="外购">外购</option>
     </select>
@@ -691,6 +719,7 @@ function initApp() {
     const t = this.value.trim();
     if (t.length >= 1) switchToSearchTab(t);
   });
+  initSearchPanel();
   renderProducts();
   updateStats();
   document.getElementById('loadingOverlay').style.display = 'none';
@@ -1035,7 +1064,9 @@ function refreshAll() {
   computeMaterialMeta();
   expandedProducts.clear();
   expandedNodes.clear();
-  document.getElementById('productFilter').value = '';
+  searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND));
+  const schemeSel = document.getElementById('searchScheme');
+  if (schemeSel) schemeSel.value = '__default__';
   document.getElementById('filterAttr').value = '';
   document.getElementById('filterStatus').value = '';
   document.getElementById('autoExpand').checked = false;
@@ -1044,6 +1075,7 @@ function refreshAll() {
   searchTags = [];
   renderSearchTags();
   renderSearchResults();
+  renderSearchConditions();
   renderProducts();
   renderKeyMaterials();
   renderKeySummary();
@@ -1400,9 +1432,162 @@ function buildTree(items) {
   return root;
 }
 
+// ============= Advanced Search (product overview) =============
+// 产品总览多条件搜索 + 方案保存。方案存 localStorage（跟随浏览器，刷新/数据刷新不影响）
+const SEARCH_FIELDS = [
+  { v: 'code', t: '物料编码' },
+  { v: 'name', t: '物料名称' },
+  { v: 'spec', t: '规格型号' },
+  { v: 'internal', t: '内部型号' },
+  { v: 'trait', t: '商务属性' },
+  { v: 'attr', t: '属性' }
+];
+const SEARCH_OPS = [
+  { v: 'contains', t: '包含' },
+  { v: 'eq', t: '等于' },
+  { v: 'ne', t: '不等于' },
+  { v: 'nc', t: '不包括' }
+];
+const DEFAULT_SEARCH_COND = [{ field: 'code', op: 'contains', val: '' }];
+let searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND)); // 当前工作区条件
+let searchSchemes = []; // 用户保存的方案 [{name, conditions}]
+
+function getFieldValue(product, field) {
+  switch (field) {
+    case 'code': return product.code;
+    case 'name': return product.name;
+    case 'spec': return product.spec;
+    case 'internal': return internalModels[product.code] || '';
+    case 'trait': return businessTraits[product.code] || '';
+    case 'attr': return product.attr || '';
+    default: return '';
+  }
+}
+function matchSearch(product) {
+  return searchConditions.every(c => {
+    const kw = String(c.val || '').trim().toLowerCase();
+    if (!kw) return true; // 空关键词 = 该条件放行
+    const v = String(getFieldValue(product, c.field) || '').toLowerCase();
+    switch (c.op) {
+      case 'eq': return v === kw;
+      case 'ne': return v !== kw;
+      case 'nc': return !v.includes(kw);
+      default: return v.includes(kw);
+    }
+  });
+}
+function searchCondHtml(c, i) {
+  return '<div class="sc-row" data-i="' + i + '">'
+    + '<select class="sc-field" onchange="onSearchRowChange(' + i + ')">'
+    + SEARCH_FIELDS.map(f => '<option value="' + f.v + '"' + (f.v === c.field ? ' selected' : '') + '>' + f.t + '</option>').join('')
+    + '</select>'
+    + '<select class="sc-op" onchange="onSearchRowChange(' + i + ')">'
+    + SEARCH_OPS.map(o => '<option value="' + o.v + '"' + (o.v === c.op ? ' selected' : '') + '>' + o.t + '</option>').join('')
+    + '</select>'
+    + '<input type="text" class="sc-val" value="' + escapeHtml(c.val || '') + '" placeholder="输入关键词..." oninput="onSearchRowChange(' + i + ')">'
+    + '<button class="sc-del" title="删除此条件" onclick="removeSearchCondition(' + i + ')">×</button>'
+    + '</div>';
+}
+function renderSearchConditions() {
+  const box = document.getElementById('searchConditions');
+  if (!box) return;
+  box.innerHTML = searchConditions.map((c, i) => searchCondHtml(c, i)).join('');
+}
+function onSearchRowChange(i) {
+  const row = document.querySelector('#searchConditions .sc-row[data-i="' + i + '"]');
+  if (!row) return;
+  searchConditions[i].field = row.querySelector('.sc-field').value;
+  searchConditions[i].op = row.querySelector('.sc-op').value;
+  searchConditions[i].val = row.querySelector('.sc-val').value;
+  saveSearchWork();
+  renderProducts();
+}
+function addSearchCondition() {
+  searchConditions.push({ field: 'code', op: 'contains', val: '' });
+  renderSearchConditions();
+}
+function removeSearchCondition(i) {
+  searchConditions.splice(i, 1);
+  if (!searchConditions.length) searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND));
+  renderSearchConditions();
+  renderProducts();
+}
+function resetSearchConditions() {
+  searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND));
+  const sel = document.getElementById('searchScheme');
+  if (sel) sel.value = '__default__';
+  renderSearchConditions();
+  renderProducts();
+}
+function saveSearchWork() {
+  try { localStorage.setItem('bom_search_work', JSON.stringify(searchConditions)); } catch (e) {}
+}
+function loadSearchWork() {
+  try {
+    const s = localStorage.getItem('bom_search_work');
+    if (s) { const arr = JSON.parse(s); if (Array.isArray(arr) && arr.length) searchConditions = arr; }
+  } catch (e) {}
+  searchConditions = searchConditions.filter(c =>
+    c && SEARCH_FIELDS.some(f => f.v === c.field) && SEARCH_OPS.some(o => o.v === c.op));
+  if (!searchConditions.length) searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND));
+}
+function refreshSchemeSelect() {
+  const sel = document.getElementById('searchScheme');
+  if (!sel) return;
+  sel.innerHTML = '<option value="__default__">⭐ 默认方案（全部产品）</option>'
+    + searchSchemes.map((s, i) => '<option value="' + i + '">' + escapeHtml(s.name) + '</option>').join('');
+}
+function loadSearchSchemes() {
+  try { searchSchemes = JSON.parse(localStorage.getItem('bom_search_schemes') || '[]'); } catch (e) { searchSchemes = []; }
+  refreshSchemeSelect();
+}
+function saveSearchSchemes() {
+  try { localStorage.setItem('bom_search_schemes', JSON.stringify(searchSchemes)); } catch (e) {}
+}
+function loadScheme(v) {
+  if (v === '__default__' || v === undefined || v === '') {
+    searchConditions = JSON.parse(JSON.stringify(DEFAULT_SEARCH_COND));
+  } else {
+    const s = searchSchemes[parseInt(v)];
+    if (s && Array.isArray(s.conditions)) searchConditions = JSON.parse(JSON.stringify(s.conditions));
+  }
+  renderSearchConditions();
+  renderProducts();
+}
+function saveCurrentScheme() {
+  const name = prompt('请输入方案名称：', '我的方案' + (searchSchemes.length + 1));
+  if (!name || !name.trim()) return;
+  const allEmpty = searchConditions.every(c => !String(c.val || '').trim());
+  if (allEmpty && !confirm('当前没有有效条件，保存后该方案会显示全部产品。仍要保存吗？')) return;
+  searchSchemes.push({ name: name.trim(), conditions: JSON.parse(JSON.stringify(searchConditions)) });
+  saveSearchSchemes();
+  refreshSchemeSelect();
+  document.getElementById('searchScheme').value = String(searchSchemes.length - 1);
+  showToast('✅ 方案已保存：' + name.trim());
+}
+function deleteSelectedScheme() {
+  const sel = document.getElementById('searchScheme');
+  const v = sel.value;
+  if (v === '__default__') { alert('默认方案不能删除，可在其基础上修改条件后点"保存方案"另存为新方案。'); return; }
+  const s = searchSchemes[parseInt(v)];
+  if (!s) return;
+  if (!confirm('确定删除方案"' + s.name + '"吗？')) return;
+  searchSchemes.splice(parseInt(v), 1);
+  saveSearchSchemes();
+  refreshSchemeSelect();
+  sel.value = '__default__';
+  loadScheme('__default__');
+  showToast('已删除方案');
+}
+function initSearchPanel() {
+  loadSearchSchemes();
+  loadSearchWork();
+  renderSearchConditions();
+  renderProducts();
+}
+
 // ============= Product Rendering =============
 function renderProducts() {
-  const ft = document.getElementById('productFilter').value.toLowerCase();
   const fa = document.getElementById('filterAttr').value;
   const fs = document.getElementById('filterStatus').value;
   const ae = document.getElementById('autoExpand').checked;
@@ -1411,9 +1596,9 @@ function renderProducts() {
   list.innerHTML = '';
 
   let products = [...BOM.products];
-  // Apply filter
+  // Apply advanced search conditions (多条件 AND)
   products = products.filter(product => {
-    if (ft && !(product.code + ' ' + product.name + ' ' + product.spec + ' ' + (internalModels[product.code]||'')).toLowerCase().includes(ft)) return false;
+    if (!matchSearch(product)) return false;
     if (fa && product.attr !== fa) return false;
     if (si && !internalModels[product.code]) return false;
     return true;
