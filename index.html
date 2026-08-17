@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html lang="zh-CN" style="--col-expand: 30px; --col-code: 150px; --col-desc: 220px; --col-internal: 75px; --col-biz: 65px; --col-attr: 48px; --col-stock: 72px; --col-safe: 72px; --col-req: 68px; --col-divider: 40px; --col-prod: 90px; --col-prodAfter: 90px; --col-shortage: 55px; --col-status: 85px;"><head>
+<html lang="zh-CN">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BOM 库存与产能管理工具</title>
@@ -359,7 +360,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 </head>
 <body>
 
-<div class="loading-overlay" id="loadingOverlay" style="display: none;">
+<div class="loading-overlay" id="loadingOverlay">
   <div class="spinner"></div>
   <div style="color: var(--text-muted); font-size: 14px;">正在加载BOM数据...</div>
 </div>
@@ -385,31 +386,252 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 </div>
 
 <!-- Stats -->
-<div class="stats-bar"></div>
+<div class="stats-bar">
+  <div class="stat-item"><span class="label">成品</span><span class="value" id="statProducts">-</span></div>
+  <div class="stat-item"><span class="label">BOM条目</span><span class="value" id="statItems">-</span></div>
+  <div class="stat-item"><span class="label">物料种类</span><span class="value" id="statMaterials">-</span></div>
+  <div class="stat-item"><span class="label">共用料</span><span class="value" id="statShared">-</span></div>
+  <div class="stat-item"><span class="label">关键物料</span><span class="value warning" id="statKey">0</span></div>
+  <div class="stat-item"><span class="label">缺料成品</span><span class="value danger" id="statShortage">0</span></div>
+  <div class="stat-item"><span class="label">可生产</span><span class="value success" id="statProducible">0</span></div>
+  <div class="stat-item"><span class="label">变更待办</span><span class="value danger" id="statChanges">0</span></div>
+</div>
 
 <!-- Tabs -->
 <div class="tabs">
   <div class="tab active" data-tab="products">📋 产品总览 <span class="badge" id="tabBadgeProducts">55</span></div>
-  <div class="tab" data-tab="keymaterials">⭐ 关键物料 <span class="badge" id="tabBadgeKey">13</span></div>
+  <div class="tab" data-tab="keymaterials">⭐ 关键物料 <span class="badge" id="tabBadgeKey">0</span></div>
   <div class="tab" data-tab="search">🔍 搜索对比</div>
   <div class="tab" data-tab="changes">🔄 物料变更 <span class="badge danger" id="tabBadgeChanges">0</span></div>
   <div class="tab" data-tab="batch">📝 批量录入</div>
 </div>
 
-<div class="main-content"></div>
+<div class="main-content">
+
+<!-- Tab: Products -->
+<div class="tab-content active" id="tab-products">
+  <div class="filter-bar">
+    <input type="text" id="productFilter" placeholder="筛选成品编码/名称/规格..." oninput="renderProducts()" style="width:280px;">
+    <select id="filterAttr" onchange="renderProducts()">
+      <option value="">全部属性</option><option value="自制">自制</option><option value="委外">委外</option><option value="外购">外购</option>
+    </select>
+    <select id="filterStatus" onchange="renderProducts()">
+      <option value="">全部状态</option><option value="ok">可生产</option><option value="warn">在途后可生产</option><option value="danger">完全缺料</option>
+    </select>
+    <label><input type="checkbox" id="autoExpand" onchange="renderProducts()"> 自动展开</label>
+    <label><input type="checkbox" id="showInternalOnly" onchange="renderProducts()"> 仅内部型号</label>
+    <button class="btn btn-sm btn-primary" onclick="expandAllProducts()">全部展开</button>
+    <button class="btn btn-sm" onclick="collapseAllProducts()" style="background:#f1f5f9;">全部收起</button>
+    <span style="margin-left:auto;font-size:11px;color:var(--text-muted);">💡 可生产=关键物料瓶颈 | 🔑=含关键物料 | 库存色: 绿≥安全 <span style="color:#c2410c;">橙</span>低 <span style="color:#b91c1c;">红</span>零库存 | 列头可拖宽</span>
+  </div>
+  <div class="product-col-header">
+    <span style="width:var(--col-expand);"></span>
+    <span class="hcol sortable-header" onclick="sortProducts('code')" style="width:var(--col-code);"><span class="hcol-text">物料编码<span class="sh-arrow" id="sh-code"></span></span><span class="col-resizer" onmousedown="startColResize(event,'code')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol sortable-header" onclick="sortProducts('name')" style="width:var(--col-desc);"><span class="hcol-text">名称/规格<span class="sh-arrow" id="sh-name"></span></span><span class="col-resizer" onmousedown="startColResize(event,'desc')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol sortable-header" onclick="sortProducts('internal')" style="width:var(--col-internal);text-align:center;"><span class="hcol-text">内部型号<span class="sh-arrow" id="sh-internal"></span></span><span class="col-resizer" onmousedown="startColResize(event,'internal')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-biz);text-align:center;"><span class="hcol-text">商务</span><span class="col-resizer" onmousedown="startColResize(event,'biz')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol sortable-header" onclick="sortProducts('attr')" style="width:var(--col-attr);text-align:center;"><span class="hcol-text">属性<span class="sh-arrow" id="sh-attr"></span></span><span class="col-resizer" onmousedown="startColResize(event,'attr')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-stock);text-align:center;"><span class="hcol-text">成品库存</span><span class="col-resizer" onmousedown="startColResize(event,'stock')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-safe);text-align:center;"><span class="hcol-text">安全库存</span><span class="col-resizer" onmousedown="startColResize(event,'safe')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-req);text-align:center;"><span class="hcol-text">需生产</span><span class="col-resizer" onmousedown="startColResize(event,'req')" onclick="event.stopPropagation()"></span></span>
+    <span style="width:var(--col-divider);"></span>
+    <span class="hcol" style="width:var(--col-prod);text-align:center;"><span class="hcol-text">可生产(关键)</span><span class="col-resizer" onmousedown="startColResize(event,'prod')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-prod-after);text-align:center;"><span class="hcol-text">在途后可产</span><span class="col-resizer" onmousedown="startColResize(event,'prodAfter')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-shortage);text-align:center;"><span class="hcol-text">缺料</span><span class="col-resizer" onmousedown="startColResize(event,'shortage')" onclick="event.stopPropagation()"></span></span>
+    <span style="width:var(--col-divider);"></span>
+    <span class="hcol" style="width:var(--col-status);text-align:center;"><span class="hcol-text">状态</span><span class="col-resizer" onmousedown="startColResize(event,'status')" onclick="event.stopPropagation()"></span></span>
+  </div>
+  <div id="productList"></div>
+</div>
+
+<!-- Tab: Key Materials -->
+<div class="tab-content" id="tab-keymaterials">
+  <div class="km-panel">
+    <h3 style="margin-bottom:8px;">关键物料批量管理</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">勾选标记关键物料。可生产数量以关键物料瓶颈为准。按层级(1.X/1.X.X)快速筛选。更新BOM后勾选保留。</p>
+    <div class="km-toolbar">
+      <input type="text" id="kmFilter" placeholder="筛选编码/名称/规格..." oninput="renderKeyMaterials()" style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:12px;">
+      <select id="kmFilterAttr" onchange="renderKeyMaterials()" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:12px;">
+        <option value="">全部属性</option><option value="外购">外购</option><option value="委外">委外</option><option value="自制">自制</option><option value="虚拟">虚拟</option>
+      </select>
+      <select id="kmFilterLevel" onchange="renderKeyMaterials()" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:12px;">
+        <option value="">全部层级</option><option value="1.x">1.X (一级BOM)</option><option value="2.x">1.X.X (二级BOM)</option><option value="3.x">1.X.X.X (三级BOM)</option>
+      </select>
+      <button class="btn btn-sm" onclick="selectAllFilteredKey()">全选当前</button>
+      <button class="btn btn-sm" onclick="deselectAllFilteredKey()">取消当前</button>
+      <button class="btn btn-sm btn-danger" onclick="clearKeyMaterials()">清除全部</button>
+    </div>
+    <div class="km-quick-select" id="kmQuickSelect"></div>
+    <div style="max-height:500px;overflow-y:auto;">
+      <table class="km-table" id="kmManageTable"></table>
+    </div>
+  </div>
+  <div class="km-panel" id="kmSummaryPanel" style="display:none;">
+    <h3 style="margin-bottom:8px;">关键物料库存与产能汇总</h3>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">汇总所有关键物料的库存、在途、总需求及可支撑套数。库存颜色: <span style="color:#166534;background:#dcfce7;">绿</span>=充足(≥安全库存) <span style="color:#c2410c;background:#ffedd5;">橙</span>=低于安全库存 <span style="color:#b91c1c;background:#fee2e2;">红</span>=零库存且无替代。列头可点击排序。</p>
+    <div style="max-height:600px;overflow-y:auto;">
+      <table class="km-table" id="kmSummaryTable"></table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Search -->
+<div class="tab-content" id="tab-search">
+  <div class="search-panel">
+    <h3 style="margin-bottom:10px;">物料搜索与共用料对比</h3>
+    <div class="search-input-group">
+      <input type="text" id="searchInput" placeholder="输入物料编码、名称或规格，回车添加..." onkeydown="if(event.key==='Enter'){addSearchTag();}">
+      <button class="btn btn-primary" onclick="addSearchTag()">添加</button>
+      <button class="btn" onclick="clearSearchTags()" style="background:#f1f5f9;">清空</button>
+    </div>
+    <div class="search-tags" id="searchTags"></div>
+    <div id="searchResults"></div>
+  </div>
+  <div id="sharedComparison"></div>
+</div>
+
+<!-- Tab: Material Changes -->
+<div class="tab-content" id="tab-changes">
+  <div class="mc-panel">
+    <div class="section-title">🔄 物料变更追踪 <span class="count" id="changesCount">(0条)</span></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">记录物料变更计划：料号变更、涉及成品、预计变更时间/库存阈值。完成后勾选归档。数据独立存储，BOM更新不影响。</p>
+
+    <!-- Add new change record -->
+    <div style="background:#f1f5f9;padding:14px;border-radius:8px;margin-bottom:14px;">
+      <div style="font-weight:600;margin-bottom:8px;font-size:13px;">➕ 新增变更记录</div>
+      <div class="mc-form-row">
+        <label>物料编码:</label>
+        <input type="text" id="mcCode" placeholder="输入或从下方选择" style="width:180px;" list="mcCodeList">
+        <datalist id="mcCodeList"></datalist>
+        <label>变更类型:</label>
+        <select id="mcType" style="width:120px;">
+          <option value="料号变更">料号变更</option><option value="规格变更">规格变更</option><option value="供应商变更">供应商变更</option><option value="停产替代">停产替代</option><option value="其他">其他</option>
+        </select>
+        <label>涉及成品:</label>
+        <input type="text" id="mcProducts" placeholder="逗号分隔，留空则关联全部" style="width:250px;">
+        <label>预计时间:</label>
+        <input type="date" id="mcDate" style="width:140px;">
+      </div>
+      <div class="mc-form-row">
+        <label>库存阈值:</label>
+        <input type="number" id="mcThreshold" placeholder="库存低于此数提醒" style="width:120px;" min="0">
+        <label>备注:</label>
+        <input type="text" id="mcNotes" placeholder="变更说明..." style="flex:1;min-width:200px;">
+        <button class="btn btn-primary btn-sm" onclick="addMaterialChange()">添加记录</button>
+      </div>
+    </div>
+
+    <!-- Quick add from search -->
+    <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:12px;color:var(--text-muted);">快速添加:</span>
+      <input type="text" id="mcQuickSearch" placeholder="搜物料编码/名称..." onkeydown="if(event.key==='Enter')quickAddChange()" style="padding:5px 10px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;width:200px;">
+      <button class="btn btn-xs btn-primary" onclick="quickAddChange()">快速添加</button>
+      <span style="font-size:11px;color:var(--text-muted);">搜索结果勾选后批量添加</span>
+    </div>
+    <div id="mcQuickResults" style="margin-bottom:10px;"></div>
+
+    <!-- Change records table -->
+    <div style="max-height:600px;overflow-y:auto;">
+      <table class="mc-table" id="mcTable"></table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Batch -->
+<div class="tab-content" id="tab-batch">
+  <div class="batch-area">
+    <h3 style="margin-bottom:10px;">批量录入库存数据</h3>
+    <div class="batch-help">
+      <p style="margin-bottom:4px;"><strong>格式：</strong>每行一条，用 Tab 或逗号分隔</p>
+      <p><code>物料编码</code> Tab <code>库存</code> Tab <code>在途</code> Tab <code>到货日期</code> Tab <code>单价</code></p>
+      <p style="margin-top:4px;">可直接从 Excel 粘贴数据。也支持只填编码+库存两列。</p>
+    </div>
+    <textarea id="batchInput" placeholder="示例：&#10;1.1.07.0502&#9;100&#9;50&#9;2025-08-15&#9;0.5&#10;2.2.0499.171&#9;200&#9;100&#9;2025-08-18&#9;15"></textarea>
+    <div class="batch-buttons">
+      <button class="btn btn-primary" onclick="batchImport()">导入</button>
+      <button class="btn" onclick="document.getElementById('batchInput').value=''" style="background:#f1f5f9;">清空</button>
+      <button class="btn btn-success" onclick="batchExportTemplate()">下载模板(含全部物料)</button>
+    </div>
+    <div class="import-result" id="importResult"></div>
+  </div>
+  <div class="batch-area" style="margin-top:14px;">
+    <h3 style="margin-bottom:10px;">内部型号批量导入</h3>
+    <div class="batch-help">
+      <p>每行一条：<code>成品编码</code> Tab <code>内部型号</code></p>
+      <p style="margin-top:4px;">更新BOM后内部型号数据保留。</p>
+    </div>
+    <textarea id="internalModelInput" placeholder="示例：&#10;HMICTAI508000001&#9;T508-20-80&#10;HMICTAI7121VX500104&#9;T7121-VX5"></textarea>
+    <div class="batch-buttons">
+      <button class="btn btn-primary" onclick="batchImportInternalModels()">导入内部型号</button>
+      <button class="btn" onclick="document.getElementById('internalModelInput').value=''" style="background:#f1f5f9;">清空</button>
+    </div>
+    <div class="import-result" id="importInternalResult"></div>
+  </div>
+  <div class="batch-area" style="margin-top:14px;">
+    <h3 style="margin-bottom:10px;">商务特性批量导入</h3>
+    <div class="batch-help">
+      <p>每行一条：<code>成品编码</code> Tab <code>商务特性</code></p>
+      <p style="margin-top:4px;">商务特性如：量产物料、试产物料、停产物料等。更新BOM后数据保留。</p>
+    </div>
+    <textarea id="bizTraitsInput" placeholder="示例：&#10;HMICTAI508000001&#9;量产物料&#10;HMICTAI7121VX500104&#9;试产物料"></textarea>
+    <div class="batch-buttons">
+      <button class="btn btn-primary" onclick="batchImportBizTraits()">导入商务特性</button>
+      <button class="btn" onclick="document.getElementById('bizTraitsInput').value=''" style="background:#f1f5f9;">清空</button>
+    </div>
+    <div class="import-result" id="importBizResult"></div>
+  </div>
+</div>
+
+</div>
 
 <!-- Excel update modal -->
-<div class="modal-overlay" id="excelModal"></div>
+<div class="modal-overlay" id="excelModal">
+  <div class="modal">
+    <h3>📊 更新BOM数据</h3>
+    <div id="excelModalContent"></div>
+    <div class="modal-buttons">
+      <button class="btn" onclick="closeExcelModal()" style="background:#f1f5f9;">取消</button>
+      <button class="btn btn-primary" id="excelConfirmBtn" onclick="confirmExcelUpdate()">确认更新</button>
+    </div>
+  </div>
+</div>
 
 <!-- Internal model edit modal -->
-<div class="modal-overlay" id="internalModelModal"></div>
+<div class="modal-overlay" id="internalModelModal">
+  <div class="modal">
+    <h3>📝 内部型号编辑</h3>
+    <p>成品编码: <strong id="imModalCode"></strong> - <span id="imModalName"></span></p>
+    <input type="text" id="imModalInput" placeholder="输入内部型号..." style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;">
+    <div class="modal-buttons">
+      <button class="btn" onclick="closeImModal()" style="background:#f1f5f9;">取消</button>
+      <button class="btn btn-primary" onclick="saveImModal()">保存</button>
+    </div>
+  </div>
+</div>
 
 
 <!-- Deploy / 在线发布设置 -->
-<div class="modal-overlay" id="deployModal" style="display: none;"></div>
+<div class="modal-overlay" id="deployModal">
+  <div class="modal" style="max-width:480px;">
+    <h3>☁ 在线发布设置</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">配置一次即可。Token 仅保存在你本机浏览器，不会上传。修改访问密码后重新点"上传同步"，同事须用新密码。</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <label style="font-size:13px;">GitHub 用户名<input type="text" id="cfgOwner" placeholder="例如 octocat" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:13px;">仓库名称（不存在将自动新建）<input type="text" id="cfgRepo" placeholder="例如 bom-tool" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:13px;">分支（默认 main）<input type="text" id="cfgBranch" value="main" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:13px;">同事访问密码<input type="text" id="cfgPassword" placeholder="默认 bom2026" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:13px;">Personal Access Token（需 repo 权限）<input type="password" id="cfgToken" placeholder="ghp_..." style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+    </div>
+    <div id="cfgUrlPreview" style="font-size:12px;color:var(--primary);margin-top:10px;word-break:break-all;"></div>
+    <div class="modal-buttons">
+      <button class="btn" onclick="closeSettings()" style="background:#f1f5f9;">取消</button>
+      <button class="btn btn-primary" onclick="saveSettingsFromForm()">保存</button>
+    </div>
+  </div>
+</div>
 
 <!-- 同步状态提示 -->
-<div id="syncToast" style="display: block; position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 10000; background: rgb(15, 23, 42); color: rgb(255, 255, 255); padding: 12px 22px; border-radius: 10px; font-size: 14px; box-shadow: rgba(0, 0, 0, 0.4) 0px 10px 30px;">📦 正在生成在线页面...</div>
+<div id="syncToast" style="display:none;position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;background:#0f172a;color:#fff;padding:12px 22px;border-radius:10px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.4);"></div>
 
 <script>window.__ONLINE__=true;</script>
 <script>
@@ -478,6 +700,9 @@ function initApp() {
 
 window.addEventListener('DOMContentLoaded', function() {
   if (window.__ONLINE__) { runOnlineLoader(); return; }
+  // 在渲染任何数据之前，保存一份"干净"的页面 HTML 快照，
+  // 供 buildOnlineShell() 生成在线页面使用（避免序列化渲染后的巨大 DOM 导致卡死）
+  window.__SHELL_HTML__ = document.documentElement.outerHTML;
   BOM = window.BOM_DATA;
   if (!BOM) { alert('BOM数据加载失败！'); return; }
   loadFromStorage();
@@ -486,6 +711,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 // 在线版：密码登录 -> 拉取解密 data.enc -> 初始化
 function runOnlineLoader() {
+  // 在线版仅供查看，隐藏"上传同步"按钮（防止误用在线数据覆盖线上/卡死）
+  const upBtn = document.getElementById('btnUpload');
+  if (upBtn) upBtn.style.display = 'none';
   const ov = document.createElement('div');
   ov.id = 'onlineLogin';
   ov.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a8a 0%,#0f172a 60%,#111827 100%);';
@@ -653,19 +881,15 @@ function showSyncStatus(t) {
 }
 function closeSyncStatus() { document.getElementById('syncToast').style.display = 'none'; }
 
-// ---- 生成在线页面（从当前页面剥离数据脚本，注入在线标记）----
+// ---- 生成在线页面（从干净快照剥离数据脚本，注入在线标记）----
 function buildOnlineShell() {
-  const main = document.querySelector('.main-content');
-  const mainSnap = main.innerHTML; main.innerHTML = '';
-  const stats = document.querySelector('.stats-bar');
-  const statsSnap = stats ? stats.innerHTML : ''; if (stats) stats.innerHTML = '';
-  const modals = Array.prototype.slice.call(document.querySelectorAll('.modal-overlay'));
-  const modalSnaps = modals.map(function(m){ return m.innerHTML; });
-  modals.forEach(function(m){ m.innerHTML = ''; });
-  let html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-  main.innerHTML = mainSnap; if (stats) stats.innerHTML = statsSnap;
-  modals.forEach(function(m, i){ m.innerHTML = modalSnaps[i]; });
-  html = html.replace(/<script\s+src=["']bom_data\.js["']>\s*<\/script>/, '<script>window.__ONLINE__=true;<\/script>');
+  // 用页面加载时的"干净快照"，绝不清空/序列化当前已渲染的巨大 DOM
+  let html = window.__SHELL_HTML__ || document.documentElement.outerHTML;
+  html = html.replace(/<script\s+src=["']bom_data\.js["']>\s*<\/script>/,
+    '<script>window.__ONLINE__=true;<\/script>');
+  if (html.indexOf('window.__ONLINE__=true') < 0) {
+    throw new Error('未能注入 __ONLINE__ 标记，请检查 bom_data.js 引用');
+  }
   return html;
 }
 
@@ -793,7 +1017,12 @@ async function syncToOnline() {
     alert('✅ 同步完成！\n\n同事访问地址：\n' + url + '\n\n访问密码：' + (cfg.password || 'bom2026') + '\n（请勿泄露密码；同事打开后输入密码即可查看，你重新点上传同步他们刷新即见最新）');
   } catch (e) {
     closeSyncStatus();
-    alert('❌ 同步失败：' + (e && e.message ? e.message : e) + '\n\n请检查：GitHub 用户名 / 仓库名 / Token(需 repo 权限) 是否正确，网络是否连通。');
+    const msg = (e && e.message ? e.message : String(e));
+    if (/401|credential|凭据|无效|Bad cred/i.test(msg)) {
+      alert('❌ 同步失败：Token 无效或已过期（凭据无效）。\n\n请点右上角"设置"，清空 Token 输入框，重新粘贴最新的 Token（首尾不要有多余空格/换行），点"保存"后再试。');
+    } else {
+      alert('❌ 同步失败：' + msg + '\n\n请检查：GitHub 用户名 / 仓库名 / Token(需 repo 权限) 是否正确，网络是否连通。');
+    }
   }
 }
 
@@ -2407,5 +2636,5 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 </script>
-
-</body></html>
+</body>
+</html>
