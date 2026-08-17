@@ -96,6 +96,7 @@ body {
   --col-internal: 75px;   /* 内部型号 */
   --col-biz: 65px;        /* 商务 */
   --col-attr: 48px;       /* 属性 */
+  --col-key: 34px;        /* 🔑 关键物料标记 */
   --col-stock: 72px;      /* 成品库存 */
   --col-safe: 72px;       /* 安全库存 */
   --col-req: 68px;        /* 需生产 */
@@ -135,7 +136,6 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .product-card.expanded { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
 .product-card.has-key { border-left: 4px solid #ef4444; background: linear-gradient(90deg, #fef2f2 0, #fff7ed 80px, var(--card-bg) 160px); box-shadow: 0 0 0 2px rgba(239,68,68,0.12); }
 .product-card.shortage { border-left: 4px solid #dc2626 !important; box-shadow: 0 0 0 3px rgba(220,38,38,0.2) !important; }
-.product-card.has-key .product-code::before { content: '🔑 '; font-size: 14px; }
 .product-header { display: flex; align-items: center; padding: 12px 14px; cursor: pointer; gap: 0; user-select: none; }
 .product-header > * { flex-shrink: 0; box-sizing: border-box; }
 .product-header:hover { background: var(--gray-light, #f1f5f9); }
@@ -151,6 +151,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .product-col-internal { width: var(--col-internal); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .product-col-biz { width: var(--col-biz); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .product-col-attr { width: var(--col-attr); flex-shrink: 0; text-align: center; }
+.product-col-key { width: var(--col-key); flex-shrink: 0; text-align: center; font-size: 13px; line-height: 1; }
 .product-col-metric { width: var(--col-prod); flex-shrink: 0; text-align: center; font-size: 14px; font-weight: 700; line-height: 1.25; }
 .product-col-metric-after { width: var(--col-prod-after); flex-shrink: 0; text-align: center; font-size: 14px; font-weight: 700; line-height: 1.25; }
 .product-col-shortage { width: var(--col-shortage); flex-shrink: 0; text-align: center; font-size: 14px; font-weight: 700; }
@@ -319,6 +320,8 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .search-panel .sp-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .search-panel .sp-title { font-size: 13px; font-weight: 700; }
 .search-panel .sp-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+/* 搜索方案面板吸顶：滚动产品列表时始终可见，方便随时切换方案 */
+#searchPanel { position: sticky; z-index: 89; box-shadow: 0 2px 8px rgba(15,23,42,0.08); }
 .search-panel select, .search-panel input[type="text"] { padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 7px; font-size: 12px; outline: none; background: var(--card-bg); }
 .search-panel select:focus, .search-panel input[type="text"]:focus { border-color: var(--primary); }
 .search-panel #searchScheme { min-width: 170px; }
@@ -459,6 +462,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
     <span class="hcol sortable-header" onclick="sortProducts('internal')" style="width:var(--col-internal);text-align:center;"><span class="hcol-text">内部型号<span class="sh-arrow" id="sh-internal"></span></span><span class="col-resizer" onmousedown="startColResize(event,'internal')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol" style="width:var(--col-biz);text-align:center;"><span class="hcol-text">商务</span><span class="col-resizer" onmousedown="startColResize(event,'biz')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol sortable-header" onclick="sortProducts('attr')" style="width:var(--col-attr);text-align:center;"><span class="hcol-text">属性<span class="sh-arrow" id="sh-attr"></span></span><span class="col-resizer" onmousedown="startColResize(event,'attr')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol" style="width:var(--col-key);text-align:center;" title="含关键物料"><span class="hcol-text">🔑</span><span class="col-resizer" onmousedown="startColResize(event,'key')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol" style="width:var(--col-stock);text-align:center;"><span class="hcol-text">成品库存</span><span class="col-resizer" onmousedown="startColResize(event,'stock')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol" style="width:var(--col-safe);text-align:center;"><span class="hcol-text">安全库存</span><span class="col-resizer" onmousedown="startColResize(event,'safe')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol" style="width:var(--col-req);text-align:center;"><span class="hcol-text">需生产</span><span class="col-resizer" onmousedown="startColResize(event,'req')" onclick="event.stopPropagation()"></span></span>
@@ -725,6 +729,7 @@ function initApp() {
   document.getElementById('loadingOverlay').style.display = 'none';
   updateMcDataList();
   applyOnlineVisibility();
+  window.addEventListener('resize', updateStickySearch);
 }
 
 window.addEventListener('DOMContentLoaded', function() {
@@ -1107,7 +1112,7 @@ function hardReset() {
 }
 
 // === 产品总览列宽拖拽调整 ===
-const COL_DEFAULTS = { expand: 30, code: 150, desc: 220, internal: 75, biz: 65, attr: 48, stock: 72, safe: 72, req: 68, divider: 40, prod: 90, prodAfter: 90, shortage: 55, status: 85 };
+const COL_DEFAULTS = { expand: 30, code: 150, desc: 220, internal: 75, biz: 65, attr: 48, key: 34, stock: 72, safe: 72, req: 68, divider: 40, prod: 90, prodAfter: 90, shortage: 55, status: 85 };
 const COL_MIN = 40;
 let colWidths = {};
 let colResizeState = null;
@@ -1492,6 +1497,18 @@ function renderSearchConditions() {
   const box = document.getElementById('searchConditions');
   if (!box) return;
   box.innerHTML = searchConditions.map((c, i) => searchCondHtml(c, i)).join('');
+  updateStickySearch();
+}
+// 搜索方案面板吸顶：动态计算顶部偏移，避免与表头重叠
+function updateStickySearch() {
+  const panel = document.getElementById('searchPanel');
+  const colHeader = document.querySelector('.product-col-header');
+  if (!panel || !colHeader) return;
+  const headerEl = document.querySelector('.header');
+  const tabsEl = document.querySelector('.tabs');
+  const base = (headerEl ? headerEl.offsetHeight : 60) + (tabsEl ? tabsEl.offsetHeight : 40);
+  panel.style.top = base + 'px';
+  colHeader.style.top = (base + panel.offsetHeight) + 'px';
 }
 function onSearchRowChange(i) {
   const row = document.querySelector('#searchConditions .sc-row[data-i="' + i + '"]');
@@ -1588,6 +1605,7 @@ function initSearchPanel() {
 
 // ============= Product Rendering =============
 function renderProducts() {
+  updateStickySearch();
   const fa = document.getElementById('filterAttr').value;
   const fs = document.getElementById('filterStatus').value;
   const ae = document.getElementById('autoExpand').checked;
@@ -1694,6 +1712,7 @@ function renderProducts() {
         <div class="product-col-internal"><input class="internal-input" value="${escapeHtml(im)}" placeholder="内部型号" onclick="event.stopPropagation()" onchange="updateInternalModel('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <div class="product-col-biz"><input class="biz-input" value="${escapeHtml(bt)}" placeholder="商务特性" onclick="event.stopPropagation()" onchange="updateBizTrait('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <span class="product-col-attr"><span class="attr-tag ${product.attr}">${product.attr}</span></span>
+        <span class="product-col-key" title="${c.hasKey ? '此成品BOM含关键物料' : '不含关键物料'}">${c.hasKey ? '<span class="key-star active" style="cursor:default;">★</span>' : ''}</span>
         <input class="stock-input" type="number" min="0" value="${ps||''}" placeholder="0" style="${STOCK_LEVEL_STYLE[psLevel]}" onclick="event.stopPropagation()" onchange="updateInv('${escCode}','stock',this.value)">
         <input class="stock-input safe-input" type="number" min="0" value="${sf||''}" placeholder="安全" onclick="event.stopPropagation()" onchange="updateSafeStock('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">
         <input class="req-input" type="number" min="0" value="${rq||''}" placeholder="需生产" onclick="event.stopPropagation()" onchange="updateReqQty('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">
