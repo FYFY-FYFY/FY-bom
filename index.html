@@ -423,6 +423,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
   <div class="tab" data-tab="keymaterials">⭐ 关键物料 <span class="badge" id="tabBadgeKey">0</span></div>
   <div class="tab" data-tab="search">🔍 搜索对比</div>
   <div class="tab" data-tab="changes">🔄 物料变更 <span class="badge danger" id="tabBadgeChanges">0</span></div>
+  <div class="tab" data-tab="orders">🏭 生产订单 <span class="badge" id="tabBadgeOrders">0</span></div>
   <div class="tab" data-tab="batch">📝 批量录入</div>
 </div>
 
@@ -533,7 +534,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <div style="font-weight:600;margin-bottom:8px;font-size:13px;">➕ 新增变更记录</div>
       <div class="mc-form-row">
         <label>物料编码:</label>
-        <input type="text" id="mcCode" placeholder="输入或从下方选择" style="width:180px;" list="mcCodeList">
+        <input type="text" id="mcCode" placeholder="输入或从下方选择" style="width:180px;" list="mcCodeList" oninput="showProductPicker()">
         <datalist id="mcCodeList"></datalist>
         <label>变更类型:</label>
         <select id="mcType" style="width:120px;">
@@ -551,6 +552,8 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
         <input type="text" id="mcNotes" placeholder="变更说明..." style="flex:1;min-width:200px;">
         <button class="btn btn-primary btn-sm" onclick="addMaterialChange()">添加记录</button>
       </div>
+      <div id="mcProductPicker" style="margin-top:8px;"></div>
+      <div id="mcSimilarWarning"></div>
     </div>
 
     <!-- Quick add from search -->
@@ -565,6 +568,34 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
     <!-- Change records table -->
     <div style="max-height:600px;overflow-y:auto;">
       <table class="mc-table" id="mcTable"></table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Production Orders -->
+<div class="tab-content" id="tab-orders">
+  <div class="mc-panel">
+    <div class="section-title">🏭 生产订单管理 <span class="count" id="ordersCount">(0条)</span></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">录入生产订单，自动检测首次生产/变更后首产并提醒检查。数据独立存储，支持Excel粘贴导入。</p>
+
+    <!-- Excel paste import -->
+    <div style="background:#f1f5f9;padding:14px;border-radius:8px;margin-bottom:14px;">
+      <div style="font-weight:600;margin-bottom:8px;font-size:13px;">📋 Excel 粘贴导入</div>
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">从生产订单Excel直接复制行粘贴（含表头也可），自动解析17列：单据日期|物料名称|单据编号|物料编码|规格型号|生产车间|单位|数量|业务状态|领料状态|内部型号|创建日期|计划开工|计划完工|排程日期|下达日期|备注</p>
+      <textarea id="poPasteInput" placeholder="粘贴Excel行..." style="width:100%;height:80px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-primary btn-sm" onclick="importProductionOrders()">导入订单</button>
+        <button class="btn btn-sm" onclick="document.getElementById('poPasteInput').value=''" style="background:#e2e8f0;">清空</button>
+        <span id="poImportResult" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+    </div>
+
+    <!-- Smart reminder panel -->
+    <div id="poReminders" style="margin-bottom:14px;"></div>
+
+    <!-- Production orders table -->
+    <div style="max-height:600px;overflow-y:auto;">
+      <table class="mc-table" id="poTable"></table>
     </div>
   </div>
 </div>
@@ -676,6 +707,7 @@ let businessTraits = {};
 let requiredQty = {};
 let safeStock = {}; // code -> 安全库存数量
 let materialChanges = [];
+let productionOrders = [];
 let expandedProducts = new Set();
 let expandedNodes = new Set();
 let searchTags = [];
@@ -705,6 +737,7 @@ function applyOverrides() {
   requiredQty = o.requiredQty || {};
   safeStock = o.safeStock || {};
   materialChanges = o.materialChanges || [];
+  productionOrders = o.productionOrders || [];
 }
 
 function applyOnlineVisibility() {
@@ -729,6 +762,7 @@ function initApp() {
   document.getElementById('loadingOverlay').style.display = 'none';
   updateMcDataList();
   applyOnlineVisibility();
+  renderProductionOrders();
   window.addEventListener('resize', updateStickySearch);
 }
 
@@ -810,6 +844,8 @@ function loadFromStorage() {
     if (ss) safeStock = JSON.parse(ss);
     const mc = localStorage.getItem('bom_material_changes');
     if (mc) materialChanges = JSON.parse(mc);
+    const po = localStorage.getItem('bom_production_orders');
+    if (po) productionOrders = JSON.parse(po);
   } catch(e) { console.error('load error', e); }
 }
 function saveToStorage() {
@@ -822,6 +858,7 @@ function saveToStorage() {
     localStorage.setItem('bom_required_qty', JSON.stringify(requiredQty));
     localStorage.setItem('bom_safe_stock', JSON.stringify(safeStock));
     localStorage.setItem('bom_material_changes', JSON.stringify(materialChanges));
+    localStorage.setItem('bom_production_orders', JSON.stringify(productionOrders));
   } catch(e) { console.error('save error', e); }
 }
 
@@ -868,7 +905,8 @@ function collectOverrides() {
     businessTraits: businessTraits,
     requiredQty: requiredQty,
     safeStock: safeStock,
-    materialChanges: materialChanges
+    materialChanges: materialChanges,
+    productionOrders: productionOrders
   };
 }
 
@@ -1023,6 +1061,7 @@ async function syncToOnline() {
     const invCount = Object.keys(overrides.inventory || {}).length;
     const keyCount = (overrides.keyMaterials || []).length;
     const safeCount = Object.keys(overrides.safeStock || {}).length;
+    const poCount = (overrides.productionOrders || []).length;
     if (invCount === 0 && keyCount === 0 && safeCount === 0) {
       const sure = confirm('⚠️ 检测到当前工具里没有任何库存/关键物料/安全库存数据！\n\n如果你平时维护过这些数据，说明它们没有被加载（可能浏览器数据被清空、或打开了错误的页面）。\n\n仍要继续上传吗？（同事看到的将是空白库存）');
       if (!sure) { closeSyncStatus(); return; }
@@ -1031,7 +1070,7 @@ async function syncToOnline() {
       if (!sure) { closeSyncStatus(); return; }
       showSyncStatus('🔐 正在加密数据...（库存 ' + invCount + ' 条 / 关键物料 0 个 ⚠️ / 安全库存 ' + safeCount + ' 条）');
     } else {
-      showSyncStatus('🔐 正在加密数据...（库存 ' + invCount + ' 条 / 关键物料 ' + keyCount + ' 个 / 安全库存 ' + safeCount + ' 条）');
+      showSyncStatus('🔐 正在加密数据...（库存 ' + invCount + ' 条 / 关键物料 ' + keyCount + ' 个 / 安全库存 ' + safeCount + ' 条 / 生产订单 ' + poCount + ' 条）');
     }
     const data = { bom: BOM, overrides };
     const enc = await encryptText(JSON.stringify(data), cfg.password);
@@ -1087,6 +1126,7 @@ function refreshAll() {
   renderKeyMaterials();
   renderKeySummary();
   renderMaterialChanges();
+  renderProductionOrders();
   updateStats();
   showToast('✅ 界面已刷新');
 }
@@ -1100,6 +1140,7 @@ function hardReset() {
   localStorage.removeItem('bom_required_qty');
   localStorage.removeItem('bom_safe_stock');
   localStorage.removeItem('bom_material_changes');
+  localStorage.removeItem('bom_production_orders');
   // Reset state
   inventory = {};
   keyMaterials = new Set();
@@ -1108,6 +1149,7 @@ function hardReset() {
   requiredQty = {};
   safeStock = {};
   materialChanges = [];
+  productionOrders = [];
   // Refresh everything
   refreshAll();
   showToast('⚠️ 所有本地数据已清除，请重新设置关键物料和库存');
@@ -1202,6 +1244,7 @@ function initTabs() {
       if (this.dataset.tab === 'keymaterials') { renderKeyMaterials(); renderKeySummary(); }
       if (this.dataset.tab === 'search') renderSearchResults();
       if (this.dataset.tab === 'changes') renderMaterialChanges();
+      if (this.dataset.tab === 'orders') renderProductionOrders();
     });
   });
 }
@@ -2430,6 +2473,9 @@ function addMaterialChange() {
   document.getElementById('mcDate').value = '';
   document.getElementById('mcThreshold').value = '';
   document.getElementById('mcNotes').value = '';
+  mcSelectedProducts.clear();
+  mcCurrentMaterialCode = '';
+  showProductPicker();
 
   saveToStorage();
   renderMaterialChanges();
@@ -2506,6 +2552,429 @@ function updateMcDataList() {
   dl.innerHTML = Object.entries(BOM.materials).map(([code, mat]) =>
     `<option value="${code}">${code} - ${mat.name} ${mat.spec}</option>`
   ).join('');
+}
+
+// ============= Enhanced Material Changes: Batch Product Selection =============
+let mcSelectedProducts = new Set();
+let mcCurrentMaterialCode = '';
+
+function showProductPicker() {
+  const code = document.getElementById('mcCode').value.trim();
+  const panel = document.getElementById('mcProductPicker');
+  if (!code) { panel.innerHTML = ''; mcSelectedProducts.clear(); mcCurrentMaterialCode = ''; return; }
+  if (code !== mcCurrentMaterialCode) { mcSelectedProducts.clear(); mcCurrentMaterialCode = code; }
+
+  const mat = BOM.materials[code];
+  const users = materialProducts[code] || [];
+  if (users.length === 0) {
+    panel.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">该物料未被任何成品BOM使用</span>';
+    return;
+  }
+
+  let h = '<div style="border:1px solid var(--border-strong);border-radius:6px;padding:8px;background:#fafafa;">';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+  h += `<span style="font-size:12px;font-weight:600;">${mat ? mat.name : code} — 使用该料的成品 (${users.length}个)</span>`;
+  h += '<button class="btn btn-xs" onclick="mcSelectAllProducts()" style="margin-left:auto;">全选</button>';
+  h += '<button class="btn btn-xs" onclick="mcDeselectAllProducts()">取消全选</button>';
+  h += '</div>';
+  h += '<div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;">';
+  users.forEach(u => {
+    const checked = mcSelectedProducts.has(u.productCode);
+    const hasOtherChange = checkOtherPendingChanges(code, u.productCode);
+    h += `<label style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:4px;${checked?'background:#dbeafe;':''}cursor:pointer;font-size:12px;">`;
+    h += `<input type="checkbox" ${checked?'checked':''} onchange="mcToggleProduct('${u.productCode}', this.checked)">`;
+    h += `<span style="font-family:monospace;font-weight:600;">${u.productCode}</span>`;
+    h += `<span style="color:var(--text-muted);">${u.productName}</span>`;
+    if (u.level) h += `<span style="color:var(--text-muted);font-size:10px;">[${u.level}]</span>`;
+    if (hasOtherChange) h += `<span style="color:var(--danger);font-size:10px;font-weight:600;">⚠ 有其他待变更</span>`;
+    h += '</label>';
+  });
+  h += '</div>';
+  const selArr = [...mcSelectedProducts];
+  if (selArr.length > 0) {
+    h += `<div style="margin-top:6px;padding:6px;background:#e0f2fe;border-radius:4px;font-size:11px;">`;
+    h += `已选 ${selArr.length} 个成品，<button class="btn btn-xs btn-primary" onclick="mcApplySelected()">填入涉及成品</button>`;
+    h += `</div>`;
+  }
+  h += '</div>';
+  panel.innerHTML = h;
+
+  mcRenderSimilarWarning();
+}
+
+function checkOtherPendingChanges(currentCode, productCode) {
+  return materialChanges.some(ch =>
+    !ch.completed && ch.code !== currentCode && isProductInChange(ch, productCode)
+  );
+}
+
+function isProductInChange(ch, productCode) {
+  if (!ch.products || ch.products.trim() === '') return true;
+  return ch.products.split(/[,，\s]+/).some(p => p.trim() === productCode);
+}
+
+function mcToggleProduct(code, checked) {
+  if (checked) mcSelectedProducts.add(code);
+  else mcSelectedProducts.delete(code);
+  showProductPicker();
+}
+
+function mcSelectAllProducts() {
+  const users = materialProducts[mcCurrentMaterialCode] || [];
+  users.forEach(u => mcSelectedProducts.add(u.productCode));
+  showProductPicker();
+}
+
+function mcDeselectAllProducts() {
+  mcSelectedProducts.clear();
+  showProductPicker();
+}
+
+function mcApplySelected() {
+  document.getElementById('mcProducts').value = [...mcSelectedProducts].join(', ');
+  showToast(`已填入 ${mcSelectedProducts.size} 个成品`);
+}
+
+function mcRenderSimilarWarning() {
+  const warnEl = document.getElementById('mcSimilarWarning');
+  if (!warnEl) return;
+  if (mcSelectedProducts.size === 0) { warnEl.innerHTML = ''; return; }
+
+  const selCodes = [...mcSelectedProducts];
+  const warnings = [];
+
+  const currentMat = BOM.materials[mcCurrentMaterialCode];
+  const currentName = currentMat ? currentMat.name : mcCurrentMaterialCode;
+
+  const pendingChanges = materialChanges.filter(ch => !ch.completed && ch.code !== mcCurrentMaterialCode);
+
+  if (pendingChanges.length > 0) {
+    const overlapping = [];
+    selCodes.forEach(pc => {
+      pendingChanges.forEach(ch => {
+        if (isProductInChange(ch, pc)) {
+          overlapping.push({ productCode: pc, changeCode: ch.code, changeName: ch.name || (BOM.materials[ch.code] ? BOM.materials[ch.code].name : ch.code) });
+        }
+      });
+    });
+
+    if (overlapping.length > 0) {
+      const grouped = {};
+      overlapping.forEach(o => {
+        const key = o.changeCode;
+        if (!grouped[key]) grouped[key] = { changeCode: o.changeCode, changeName: o.changeName, products: [] };
+        grouped[key].products.push(o.productCode);
+      });
+      warnings.push({
+        title: '这些成品还有其他待处理变更',
+        items: Object.values(grouped).map(g => `${g.changeName} (${g.changeCode}): ${g.products.join(', ')}`)
+      });
+    }
+  }
+
+  const productItems = selCodes.map(pc => {
+    const p = BOM.products.find(pp => pp.code === pc);
+    return p ? p : { code: pc, name: '', items: [] };
+  });
+
+  const sharedMats = {};
+  productItems.forEach(p => {
+    (p.items || []).forEach(it => {
+      if (!it.c || it.a === '虚拟') return;
+      if (!sharedMats[it.c]) sharedMats[it.c] = [];
+      if (!sharedMats[it.c].includes(p.code)) sharedMats[it.c].push(p.code);
+    });
+  });
+
+  const sharedByAll = Object.entries(sharedMats).filter(([mc, prods]) => prods.length === selCodes.length && mc !== mcCurrentMaterialCode);
+  const partialShared = Object.entries(sharedMats).filter(([mc, prods]) => prods.length > 1 && prods.length < selCodes.length && mc !== mcCurrentMaterialCode);
+
+  if (partialShared.length > 0) {
+    const items = partialShared.map(([mc, prods]) => {
+      const m = BOM.materials[mc];
+      const mName = m ? m.name : mc;
+      const included = prods;
+      const excluded = selCodes.filter(c => !included.includes(c));
+      return `${mName} (${mc}): ${included.length}个成品共用，但 ${excluded.map(c => { const p = BOM.products.find(pp => pp.code === c); return p ? p.name : c; }).join('、')} 不含此料`;
+    });
+    warnings.push({
+      title: '部分成品共用物料但非全部一致，注意检查',
+      items
+    });
+  }
+
+  if (warnings.length === 0) { warnEl.innerHTML = ''; return; }
+
+  let h = '<div style="margin-top:8px;padding:10px;border:1px solid #fbbf24;border-radius:6px;background:#fffbeb;">';
+  warnings.forEach(w => {
+    h += `<div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:4px;">⚠ ${w.title}</div>`;
+    w.items.forEach(it => {
+      h += `<div style="font-size:11px;color:#78350f;padding-left:12px;margin-bottom:2px;">• ${it}</div>`;
+    });
+  });
+  h += '</div>';
+  warnEl.innerHTML = h;
+}
+
+// ============= Production Orders =============
+function renderProductionOrders() {
+  const sorted = [...productionOrders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  document.getElementById('ordersCount').textContent = `(${productionOrders.length}条, ${sorted.filter(o => !o.reminderChecked).length}条待检查)`;
+  document.getElementById('tabBadgeOrders').textContent = productionOrders.length;
+
+  let h = '<thead><tr>';
+  h += '<th style="width:30px;">✓</th>';
+  h += '<th style="width:80px;">单据日期</th>';
+  h += '<th style="width:110px;">单据编号</th>';
+  h += '<th style="width:135px;">物料编码</th>';
+  h += '<th>名称</th>';
+  h += '<th style="width:90px;">规格型号</th>';
+  h += '<th style="width:55px;">数量</th>';
+  h += '<th style="width:70px;">业务状态</th>';
+  h += '<th style="width:70px;">领料状态</th>';
+  h += '<th style="width:100px;">内部型号</th>';
+  h += '<th style="width:80px;">计划开工</th>';
+  h += '<th style="width:80px;">计划完工</th>';
+  h += '<th>备注</th>';
+  h += '<th style="width:50px;">操作</th>';
+  h += '</tr></thead><tbody>';
+
+  if (sorted.length === 0) {
+    h += '<tr><td colspan="14" style="text-align:center;padding:24px;color:var(--text-muted);">暂无生产订单，请从上方粘贴Excel数据导入</td></tr>';
+  }
+
+  sorted.forEach((o, idx) => {
+    const realIdx = productionOrders.indexOf(o);
+    const reminders = getOrderReminders(o);
+    const hasReminder = reminders.length > 0;
+    const rowCls = hasReminder && !o.reminderChecked ? 'pending' : '';
+
+    h += `<tr class="${rowCls}">`;
+    h += `<td><input type="checkbox" ${o.reminderChecked?'checked':''} onchange="toggleOrderChecked(${realIdx})" title="标记已检查"></td>`;
+    h += `<td style="font-size:11px;">${o.orderDate||''}</td>`;
+    h += `<td style="font-family:monospace;font-size:11px;">${o.orderNo||''}</td>`;
+    h += `<td style="font-family:monospace;font-weight:700;font-size:11px;">${o.productCode||''}</td>`;
+    h += `<td style="font-size:11px;">${o.productName||''}</td>`;
+    h += `<td style="font-size:11px;color:var(--text-muted);">${o.spec||''}</td>`;
+    h += `<td class="num" style="font-weight:600;">${o.qty||''}</td>`;
+    h += `<td><span class="status-badge ${o.bizStatus==='计划确认'?'warn':(o.bizStatus==='下达'?'ok':'')}">${o.bizStatus||''}</span></td>`;
+    h += `<td><span class="status-badge ${o.materialStatus==='已领料'?'ok':(o.materialStatus==='未领料'?'warn':'')}">${o.materialStatus||''}</span></td>`;
+    h += `<td style="font-size:11px;">${o.internalModel||''}</td>`;
+    h += `<td style="font-size:11px;">${(o.planStart||'').split(' ')[0]}</td>`;
+    h += `<td style="font-size:11px;">${(o.planEnd||'').split(' ')[0]}</td>`;
+    h += `<td style="font-size:11px;color:var(--text-muted);max-width:150px;overflow:hidden;text-overflow:ellipsis;" title="${o.notes||''}">${o.notes||''}</td>`;
+    h += `<td><button class="btn btn-xs btn-danger" onclick="deleteOrder(${realIdx})" title="删除">✕</button></td>`;
+    h += '</tr>';
+
+    if (hasReminder && !o.reminderChecked) {
+      h += `<tr><td colspan="14" style="padding:0;border-top:none;">`;
+      h += '<div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:6px;margin:4px 8px;padding:10px;">';
+      h += '<div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:6px;">⚠ 需检查以下内容：</div>';
+      reminders.forEach(r => {
+        h += `<div style="font-size:11px;color:#78350f;padding-left:12px;margin-bottom:3px;">`;
+        h += `<strong>${r.type}</strong>：${r.message}`;
+        if (r.details && r.details.length > 0) {
+          h += '<ul style="margin:2px 0 2px 16px;padding:0;">';
+          r.details.forEach(d => { h += `<li style="margin-bottom:1px;">${d}</li>`; });
+          h += '</ul>';
+        }
+        h += '</div>';
+      });
+      h += '</div></td></tr>';
+    }
+  });
+  h += '</tbody>';
+  document.getElementById('poTable').innerHTML = h;
+  renderPOReminders();
+}
+
+function getOrderReminders(order) {
+  const reminders = [];
+
+  const priorOrders = productionOrders.filter(o =>
+    o.productCode === order.productCode && (o.createdAt || 0) < (order.createdAt || 0)
+  );
+  if (priorOrders.length === 0) {
+    reminders.push({
+      type: '首次生产',
+      message: `成品 ${order.productCode} 首次录入生产订单，请确认BOM准确性和物料库存充足。`
+    });
+  }
+
+  const productCode = order.productCode;
+  const pendingChanges = materialChanges.filter(ch => !ch.completed);
+  const productChanges = [];
+  const bomChanges = [];
+
+  const product = BOM.products.find(p => p.code === productCode);
+  const bomMaterialCodes = new Set();
+  if (product) {
+    (product.items || []).forEach(it => { if (it.c) bomMaterialCodes.add(it.c); });
+  }
+
+  pendingChanges.forEach(ch => {
+    if (isProductInChange(ch, productCode)) {
+      const mat = BOM.materials[ch.code];
+      productChanges.push({
+        code: ch.code,
+        name: mat ? mat.name : (ch.name || ch.code),
+        type: ch.type,
+        notes: ch.notes || ''
+      });
+    } else if (bomMaterialCodes.has(ch.code)) {
+      const mat = BOM.materials[ch.code];
+      bomChanges.push({
+        code: ch.code,
+        name: mat ? mat.name : (ch.name || ch.code),
+        type: ch.type,
+        notes: ch.notes || ''
+      });
+    }
+  });
+
+  if (productChanges.length > 0) {
+    reminders.push({
+      type: '变更后首产',
+      message: '该成品有待处理的物料变更记录，生产前请确认变更已落实：',
+      details: productChanges.map(c => `${c.name} (${c.code}) — ${c.type}${c.notes ? '：' + c.notes : ''}`)
+    });
+  }
+
+  if (bomChanges.length > 0) {
+    reminders.push({
+      type: 'BOM物料变更',
+      message: '该成品BOM中有物料存在待处理变更，请确认是否影响本次生产：',
+      details: bomChanges.map(c => `${c.name} (${c.code}) — ${c.type}${c.notes ? '：' + c.notes : ''}`)
+    });
+  }
+
+  return reminders;
+}
+
+function renderPOReminders() {
+  const container = document.getElementById('poReminders');
+  if (!container) return;
+  const unchecked = productionOrders.filter(o => !o.reminderChecked);
+  const allReminders = [];
+  unchecked.forEach(o => {
+    const r = getOrderReminders(o);
+    if (r.length > 0) allReminders.push({ order: o, reminders: r });
+  });
+
+  if (allReminders.length === 0) { container.innerHTML = ''; return; }
+
+  let h = '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;">';
+  h += '<div style="font-weight:700;font-size:13px;color:#92400e;margin-bottom:8px;">⚠ 生产订单检查提醒 (' + allReminders.length + '条待检查)</div>';
+  allReminders.forEach(item => {
+    h += `<div style="margin-bottom:8px;padding:8px;background:#fffbeb;border-radius:6px;">`;
+    h += `<div style="font-size:12px;font-weight:600;">${item.order.productCode} — ${item.order.productName} (订单: ${item.order.orderNo}, 数量: ${item.order.qty})</div>`;
+    item.reminders.forEach(r => {
+      h += `<div style="font-size:11px;color:#78350f;margin-top:3px;padding-left:8px;">`;
+      h += `<strong>${r.type}</strong>：${r.message}`;
+      if (r.details && r.details.length > 0) {
+        h += '<ul style="margin:2px 0 2px 16px;padding:0;">';
+        r.details.forEach(d => { h += `<li style="margin-bottom:1px;">${d}</li>`; });
+        h += '</ul>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+  });
+  h += '</div>';
+  container.innerHTML = h;
+}
+
+function importProductionOrders() {
+  const text = document.getElementById('poPasteInput').value.trim();
+  const resultEl = document.getElementById('poImportResult');
+  if (!text) { resultEl.textContent = '请粘贴数据'; resultEl.style.color = 'var(--danger)'; return; }
+
+  const lines = text.split('\n').filter(l => l.trim());
+  let ok = 0, skip = 0;
+  const errs = [];
+  let headerSkipped = false;
+
+  const headerKeywords = ['单据日期', '物料名称', '单据编号', '物料编码'];
+
+  lines.forEach((line, i) => {
+    const parts = line.split(/\t/).map(s => s.trim());
+    if (parts.length < 4) { skip++; return; }
+
+    if (i === 0 && headerKeywords.some(kw => parts[0].includes(kw) || parts[3].includes(kw))) {
+      headerSkipped = true;
+      return;
+    }
+
+    const productCode = parts[3] || '';
+    if (!productCode) { skip++; return; }
+
+    const existing = productionOrders.find(o =>
+      o.orderNo === (parts[2] || '') && o.productCode === productCode
+    );
+    if (existing) { skip++; return; }
+
+    productionOrders.push({
+      id: Date.now() + ok,
+      orderDate: parts[0] || '',
+      productName: parts[1] || '',
+      orderNo: parts[2] || '',
+      productCode: productCode,
+      spec: parts[4] || '',
+      workshop: parts[5] || '',
+      unit: parts[6] || '',
+      qty: parseFloat(parts[7]) || 0,
+      bizStatus: parts[8] || '',
+      materialStatus: parts[9] || '',
+      internalModel: parts[10] || '',
+      createDate: parts[11] || '',
+      planStart: parts[12] || '',
+      planEnd: parts[13] || '',
+      scheduleDate: parts[14] || '',
+      issueDate: parts[15] || '',
+      notes: parts[16] || '',
+      reminderChecked: false,
+      createdAt: Date.now() + ok
+    });
+    ok++;
+  });
+
+  saveToStorage();
+  renderProductionOrders();
+  resultEl.textContent = `导入成功 ${ok} 条${skip > 0 ? `，跳过 ${skip} 条(重复或格式不符)` : ''}`;
+  resultEl.style.color = 'var(--success)';
+  document.getElementById('poPasteInput').value = '';
+
+  const newOrders = productionOrders.filter(o => !o.reminderChecked);
+  if (newOrders.length > 0) {
+    const allReminders = newOrders.flatMap(o => getOrderReminders(o));
+    if (allReminders.length > 0) {
+      showToast(`⚠ ${newOrders.length} 条新订单有检查提醒，请查看下方详情`);
+    } else {
+      showToast(`✅ ${ok} 条订单已导入，无需额外检查`);
+    }
+  }
+}
+
+function toggleOrderChecked(idx) {
+  if (idx < 0 || idx >= productionOrders.length) return;
+  productionOrders[idx].reminderChecked = !productionOrders[idx].reminderChecked;
+  saveToStorage();
+  renderProductionOrders();
+}
+
+function deleteOrder(idx) {
+  if (idx < 0 || idx >= productionOrders.length) return;
+  if (!confirm('确定删除此生产订单？')) return;
+  productionOrders.splice(idx, 1);
+  saveToStorage();
+  renderProductionOrders();
+  showToast('生产订单已删除');
+}
+
+function updateOrderField(idx, field, value) {
+  if (idx < 0 || idx >= productionOrders.length) return;
+  productionOrders[idx][field] = value;
+  saveToStorage();
 }
 
 // ============= Batch Import =============
