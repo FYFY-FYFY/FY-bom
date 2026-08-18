@@ -527,15 +527,22 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 <div class="tab-content" id="tab-changes">
   <div class="mc-panel">
     <div class="section-title">🔄 物料变更追踪 <span class="count" id="changesCount">(0条)</span></div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">记录物料变更计划：料号变更、涉及成品、预计变更时间/库存阈值。完成后勾选归档。数据独立存储，BOM更新不影响。</p>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">记录物料变更计划：支持多个主变更物料+副变更物料，按主物料列出涉及成品（可筛选），勾选后自动比对各成品BOM与主/副物料是否一致并提醒。完成后勾选归档。数据独立存储，BOM更新不影响。</p>
 
     <!-- Add new change record -->
     <div style="background:#f1f5f9;padding:14px;border-radius:8px;margin-bottom:14px;">
       <div style="font-weight:600;margin-bottom:8px;font-size:13px;">➕ 新增变更记录</div>
       <div class="mc-form-row">
-        <label>物料编码:</label>
-        <input type="text" id="mcCode" placeholder="输入或从下方选择" style="width:180px;" list="mcCodeList" oninput="showProductPicker()">
+        <label>主变更物料:</label>
+        <input type="text" id="mcCode" placeholder="主物料编码，回车或点➕添加（可多个）" style="width:230px;" list="mcCodeList" onkeydown="if(event.key==='Enter'){event.preventDefault();mcAddPrimary();}">
         <datalist id="mcCodeList"></datalist>
+        <button class="btn btn-xs" onclick="mcAddPrimary()" title="添加主变更物料">➕主</button>
+        <label>副变更物料:</label>
+        <input type="text" id="mcSecondaryCode" placeholder="副物料编码，回车或点➕添加（可多个）" style="width:230px;" list="mcCodeList" onkeydown="if(event.key==='Enter'){event.preventDefault();mcAddSecondary();}">
+        <button class="btn btn-xs" onclick="mcAddSecondary()" title="添加副变更物料">➕副</button>
+      </div>
+      <div id="mcChips" style="margin:6px 0;"></div>
+      <div class="mc-form-row">
         <label>变更类型:</label>
         <select id="mcType" style="width:120px;">
           <option value="料号变更">料号变更</option><option value="规格变更">规格变更</option><option value="供应商变更">供应商变更</option><option value="停产替代">停产替代</option><option value="其他">其他</option>
@@ -2430,7 +2437,12 @@ function renderMaterialChanges() {
     h += `<tr class="${rowCls}">`;
     h += `<td><input type="checkbox" ${ch.completed?'checked':''} onchange="toggleChangeComplete(${idx})" title="标记完成"></td>`;
     h += `<td>${ch.completed ? '<span class="status-badge ok">已完成</span>' : (belowThreshold ? '<span class="status-badge danger">⚠ 库存不足</span>' : '<span class="status-badge warn">待处理</span>')}</td>`;
-    h += `<td style="font-family:monospace;font-weight:700;font-size:11px;">${ch.code}</td>`;
+    const chPrims = mcGetCodes(ch);
+    const chSecs = ch.secondaryCodes || [];
+    h += `<td style="font-family:monospace;font-weight:700;font-size:11px;">`;
+    chPrims.forEach(c => { h += `<div title="${mcMatName(c)}">${c}</div>`; });
+    if (chSecs.length > 0) h += `<div style="color:#b45309;" title="副变更物料: ${chSecs.map(c => mcMatName(c)).join('、')}">副:${chSecs.join('、')}</div>`;
+    h += `</td>`;
     h += `<td>${mat?mat.name:(ch.name||'')}</td>`;
     h += `<td style="font-size:11px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;" title="${ch.spec||''}">${ch.spec||(mat?mat.spec:'')}</td>`;
     h += `<td><select onchange="updateChangeField(${idx},'type',this.value)" style="font-size:11px;">${['料号变更','规格变更','供应商变更','停产替代','其他'].map(t => `<option ${ch.type===t?'selected':''}>${t}</option>`).join('')}</select></td>`;
@@ -2448,18 +2460,22 @@ function renderMaterialChanges() {
 }
 
 function addMaterialChange() {
-  const code = document.getElementById('mcCode').value.trim();
+  if (document.getElementById('mcCode').value.trim()) mcAddPrimary();
+  if (document.getElementById('mcSecondaryCode').value.trim()) mcAddSecondary();
+  if (mcPrimaryCodes.length === 0) { showToast('请先添加至少一个主变更物料'); return; }
+
   const type = document.getElementById('mcType').value;
   const products = document.getElementById('mcProducts').value.trim();
   const changeTime = document.getElementById('mcDate').value;
   const remainingStock = parseFloat(document.getElementById('mcThreshold').value) || 0;
   const notes = document.getElementById('mcNotes').value.trim();
 
-  if (!code) { showToast('请输入物料编码'); return; }
-
+  const code = mcPrimaryCodes[0];
   const mat = BOM.materials[code];
   materialChanges.push({
     code, type,
+    primaryCodes: [...mcPrimaryCodes],
+    secondaryCodes: [...mcSecondaryCodes],
     name: mat ? mat.name : '',
     spec: mat ? mat.spec : '',
     products, changeTime, remainingStock, notes,
@@ -2468,13 +2484,15 @@ function addMaterialChange() {
   });
 
   // Clear form
-  document.getElementById('mcCode').value = '';
   document.getElementById('mcProducts').value = '';
   document.getElementById('mcDate').value = '';
   document.getElementById('mcThreshold').value = '';
   document.getElementById('mcNotes').value = '';
+  mcPrimaryCodes = [];
+  mcSecondaryCodes = [];
   mcSelectedProducts.clear();
-  mcCurrentMaterialCode = '';
+  mcPickerFilter = '';
+  mcRenderChips();
   showProductPicker();
 
   saveToStorage();
@@ -2554,57 +2572,171 @@ function updateMcDataList() {
   ).join('');
 }
 
-// ============= Enhanced Material Changes: Batch Product Selection =============
+// ============= Enhanced Material Changes: Primary/Secondary Materials + Batch Product Selection =============
 let mcSelectedProducts = new Set();
-let mcCurrentMaterialCode = '';
+let mcPrimaryCodes = [];   // 主变更物料（可多个）
+let mcSecondaryCodes = []; // 副变更物料（可多个）
+let mcPickerFilter = '';
+let mcShownProducts = [];
+
+function mcGetCodes(ch) {
+  return (ch && ch.primaryCodes && ch.primaryCodes.length ? ch.primaryCodes : [ch.code]);
+}
+
+function mcMatName(code) {
+  const m = BOM.materials[code];
+  return m ? m.name : code;
+}
+
+function productHasMaterial(productCode, code) {
+  return (materialProducts[code] || []).some(u => u.productCode === productCode);
+}
+
+function mcRenderChips() {
+  const el = document.getElementById('mcChips');
+  if (!el) return;
+  if (mcPrimaryCodes.length === 0 && mcSecondaryCodes.length === 0) { el.innerHTML = ''; return; }
+  let h = '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;font-size:11px;">';
+  mcPrimaryCodes.forEach(c => {
+    h += `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;">`;
+    h += `<strong>主</strong> <span style="font-family:monospace;font-weight:600;">${c}</span> <span>${mcMatName(c)}</span>`;
+    h += `<a onclick="mcRemovePrimary('${c}')" style="cursor:pointer;font-weight:700;margin-left:2px;" title="移除">✕</a></span>`;
+  });
+  mcSecondaryCodes.forEach(c => {
+    h += `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:#ffedd5;color:#9a3412;border:1px solid #fdba74;">`;
+    h += `<strong>副</strong> <span style="font-family:monospace;">${c}</span> <span>${mcMatName(c)}</span>`;
+    h += `<a onclick="mcRemoveSecondary('${c}')" style="cursor:pointer;font-weight:700;margin-left:2px;" title="移除">✕</a></span>`;
+  });
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+function mcAddPrimary() {
+  const inp = document.getElementById('mcCode');
+  const code = inp.value.trim();
+  if (!code) return;
+  if (mcPrimaryCodes.includes(code)) { showToast('该主变更物料已添加'); inp.value = ''; return; }
+  const secIdx = mcSecondaryCodes.indexOf(code);
+  if (secIdx >= 0) mcSecondaryCodes.splice(secIdx, 1); // 已是副物料则升级为主物料
+  if (!BOM.materials[code]) showToast('⚠ 该编码不在当前BOM物料库中，仍可添加');
+  mcPrimaryCodes.push(code);
+  inp.value = '';
+  mcRenderChips();
+  showProductPicker();
+}
+
+function mcAddSecondary() {
+  const inp = document.getElementById('mcSecondaryCode');
+  const code = inp.value.trim();
+  if (!code) return;
+  if (mcSecondaryCodes.includes(code)) { showToast('该副变更物料已添加'); inp.value = ''; return; }
+  if (mcPrimaryCodes.includes(code)) { showToast('该编码已是主变更物料'); inp.value = ''; return; }
+  if (!BOM.materials[code]) showToast('⚠ 该编码不在当前BOM物料库中，仍可添加');
+  mcSecondaryCodes.push(code);
+  inp.value = '';
+  mcRenderChips();
+  showProductPicker();
+}
+
+function mcRemovePrimary(code) {
+  mcPrimaryCodes = mcPrimaryCodes.filter(c => c !== code);
+  mcRenderChips();
+  showProductPicker();
+}
+
+function mcRemoveSecondary(code) {
+  mcSecondaryCodes = mcSecondaryCodes.filter(c => c !== code);
+  mcRenderChips();
+  showProductPicker();
+}
 
 function showProductPicker() {
-  const code = document.getElementById('mcCode').value.trim();
   const panel = document.getElementById('mcProductPicker');
-  if (!code) { panel.innerHTML = ''; mcSelectedProducts.clear(); mcCurrentMaterialCode = ''; return; }
-  if (code !== mcCurrentMaterialCode) { mcSelectedProducts.clear(); mcCurrentMaterialCode = code; }
+  if (!panel) return;
+  mcRenderSimilarWarning();
 
-  const mat = BOM.materials[code];
-  const users = materialProducts[code] || [];
-  if (users.length === 0) {
-    panel.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">该物料未被任何成品BOM使用</span>';
+  if (mcPrimaryCodes.length === 0) {
+    mcSelectedProducts.clear();
+    panel.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">添加主变更物料后，这里会列出使用该物料的成品供筛选勾选</span>';
     return;
   }
 
+  // 所有主变更物料使用成品的并集
+  const prodMap = {};
+  mcPrimaryCodes.forEach(code => {
+    (materialProducts[code] || []).forEach(u => {
+      if (!prodMap[u.productCode]) prodMap[u.productCode] = { productCode: u.productCode, productName: u.productName, present: new Set() };
+      prodMap[u.productCode].present.add(code);
+    });
+  });
+  const users = Object.values(prodMap);
+  if (users.length === 0) {
+    panel.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">主变更物料未被任何成品BOM使用</span>';
+    return;
+  }
+
+  const f = mcPickerFilter.trim().toLowerCase();
+  mcShownProducts = f ? users.filter(u => {
+    const im = internalModels[u.productCode] || '';
+    const bt = businessTraits[u.productCode] || '';
+    return u.productCode.toLowerCase().includes(f) || (u.productName || '').toLowerCase().includes(f) || im.toLowerCase().includes(f) || bt.toLowerCase().includes(f);
+  }) : users;
+
   let h = '<div style="border:1px solid var(--border-strong);border-radius:6px;padding:8px;background:#fafafa;">';
-  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-  h += `<span style="font-size:12px;font-weight:600;">${mat ? mat.name : code} — 使用该料的成品 (${users.length}个)</span>`;
-  h += '<button class="btn btn-xs" onclick="mcSelectAllProducts()" style="margin-left:auto;">全选</button>';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">';
+  h += `<span style="font-size:12px;font-weight:600;">使用主变更物料的成品 (${users.length}个${f ? `，筛选出 ${mcShownProducts.length} 个` : ''})</span>`;
+  h += `<input type="text" id="mcPickerFilterInput" placeholder="筛选: 成品编码/名称/内部型号/商务属性" value="${mcPickerFilter.replace(/"/g, '&quot;')}" oninput="mcSetFilter(this.value)" style="margin-left:auto;padding:3px 8px;border:1px solid var(--border-strong);border-radius:4px;font-size:11px;width:230px;">`;
+  h += '<button class="btn btn-xs" onclick="mcSelectAllProducts()">全选(筛选结果)</button>';
   h += '<button class="btn btn-xs" onclick="mcDeselectAllProducts()">取消全选</button>';
   h += '</div>';
-  h += '<div style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;">';
-  users.forEach(u => {
+
+  h += '<div style="display:flex;gap:6px;font-size:10px;color:var(--text-muted);padding:0 6px 4px;font-weight:600;">';
+  h += '<span style="width:190px;">成品编码 / 型号</span><span style="width:90px;">内部型号</span><span style="width:90px;">商务属性</span><span>主/副物料一致性</span></div>';
+  h += '<div style="max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;">';
+  mcShownProducts.forEach(u => {
     const checked = mcSelectedProducts.has(u.productCode);
-    const hasOtherChange = checkOtherPendingChanges(code, u.productCode);
+    const im = internalModels[u.productCode] || '';
+    const bt = businessTraits[u.productCode] || '';
+    const missingPrim = mcPrimaryCodes.filter(c => !u.present.has(c));
+    const missingSec = mcSecondaryCodes.filter(c => !productHasMaterial(u.productCode, c));
+    const otherChange = checkOtherPendingChanges([...mcPrimaryCodes, ...mcSecondaryCodes], u.productCode);
     h += `<label style="display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:4px;${checked?'background:#dbeafe;':''}cursor:pointer;font-size:12px;">`;
     h += `<input type="checkbox" ${checked?'checked':''} onchange="mcToggleProduct('${u.productCode}', this.checked)">`;
-    h += `<span style="font-family:monospace;font-weight:600;">${u.productCode}</span>`;
-    h += `<span style="color:var(--text-muted);">${u.productName}</span>`;
-    if (u.level) h += `<span style="color:var(--text-muted);font-size:10px;">[${u.level}]</span>`;
-    if (hasOtherChange) h += `<span style="color:var(--danger);font-size:10px;font-weight:600;">⚠ 有其他待变更</span>`;
-    h += '</label>';
+    h += `<span style="width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-family:monospace;font-weight:600;">${u.productCode}</span> <span style="color:var(--text-muted);font-size:11px;">${u.productName||''}</span></span>`;
+    h += `<span style="width:90px;font-size:11px;color:#7c3aed;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${im}">${im}</span>`;
+    h += `<span style="width:90px;font-size:11px;color:#0e7490;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${bt}">${bt}</span>`;
+    h += `<span style="flex:1;font-size:10px;">`;
+    if (missingPrim.length === 0 && missingSec.length === 0) h += `<span style="color:var(--success);font-weight:600;">✓ 主副物料齐全</span>`;
+    if (missingPrim.length > 0) h += `<span style="color:var(--danger);font-weight:600;">⚠ 缺主料:${missingPrim.map(c => mcMatName(c)).join('、')} </span>`;
+    if (missingSec.length > 0) h += `<span style="color:#b45309;font-weight:600;">⚠ 缺副料:${missingSec.map(c => mcMatName(c)).join('、')}</span>`;
+    if (otherChange) h += ` <span style="color:var(--danger);font-weight:600;">⚠ 有其他待变更</span>`;
+    h += `</span></label>`;
   });
   h += '</div>';
-  const selArr = [...mcSelectedProducts];
-  if (selArr.length > 0) {
+
+  if (mcSelectedProducts.size > 0) {
     h += `<div style="margin-top:6px;padding:6px;background:#e0f2fe;border-radius:4px;font-size:11px;">`;
-    h += `已选 ${selArr.length} 个成品，<button class="btn btn-xs btn-primary" onclick="mcApplySelected()">填入涉及成品</button>`;
+    h += `已选 ${mcSelectedProducts.size} 个成品，<button class="btn btn-xs btn-primary" onclick="mcApplySelected()">填入涉及成品</button>`;
     h += `</div>`;
   }
   h += '</div>';
   panel.innerHTML = h;
-
-  mcRenderSimilarWarning();
 }
 
-function checkOtherPendingChanges(currentCode, productCode) {
+function mcSetFilter(v) {
+  mcPickerFilter = v;
+  showProductPicker();
+  const fi = document.getElementById('mcPickerFilterInput');
+  if (fi) {
+    fi.focus();
+    const n = fi.value.length;
+    try { fi.setSelectionRange(n, n); } catch (e) {}
+  }
+}
+
+function checkOtherPendingChanges(currentCodes, productCode) {
   return materialChanges.some(ch =>
-    !ch.completed && ch.code !== currentCode && isProductInChange(ch, productCode)
+    !ch.completed && mcGetCodes(ch).every(c => !currentCodes.includes(c)) && isProductInChange(ch, productCode)
   );
 }
 
@@ -2620,8 +2752,7 @@ function mcToggleProduct(code, checked) {
 }
 
 function mcSelectAllProducts() {
-  const users = materialProducts[mcCurrentMaterialCode] || [];
-  users.forEach(u => mcSelectedProducts.add(u.productCode));
+  mcShownProducts.forEach(u => mcSelectedProducts.add(u.productCode));
   showProductPicker();
 }
 
@@ -2643,17 +2774,35 @@ function mcRenderSimilarWarning() {
   const selCodes = [...mcSelectedProducts];
   const warnings = [];
 
-  const currentMat = BOM.materials[mcCurrentMaterialCode];
-  const currentName = currentMat ? currentMat.name : mcCurrentMaterialCode;
+  // 1) 勾选成品与主/副变更物料的 BOM 一致性检测
+  const diffItems = [];
+  selCodes.forEach(pc => {
+    const missing = [];
+    mcPrimaryCodes.forEach(c => { if (!productHasMaterial(pc, c)) missing.push(`主料 ${mcMatName(c)}(${c})`); });
+    mcSecondaryCodes.forEach(c => { if (!productHasMaterial(pc, c)) missing.push(`副料 ${mcMatName(c)}(${c})`); });
+    if (missing.length > 0) {
+      const p = BOM.products.find(pp => pp.code === pc);
+      diffItems.push(`<strong style="font-family:monospace;">${pc}</strong> ${p ? p.name : ''}：不含 ${missing.join('、')}`);
+    }
+  });
+  if (diffItems.length > 0) {
+    warnings.push({
+      title: '以下勾选成品的BOM与主/副变更物料不一致，请确认是否使用了不同物料（如前壳相同、后壳不同）',
+      items: diffItems
+    });
+  }
 
-  const pendingChanges = materialChanges.filter(ch => !ch.completed && ch.code !== mcCurrentMaterialCode);
+  // 2) 勾选成品与其他待处理变更的重叠提醒
+  const curCodes = [...mcPrimaryCodes, ...mcSecondaryCodes];
+  const pendingChanges = materialChanges.filter(ch => !ch.completed && mcGetCodes(ch).every(c => !curCodes.includes(c)));
 
   if (pendingChanges.length > 0) {
     const overlapping = [];
     selCodes.forEach(pc => {
       pendingChanges.forEach(ch => {
         if (isProductInChange(ch, pc)) {
-          overlapping.push({ productCode: pc, changeCode: ch.code, changeName: ch.name || (BOM.materials[ch.code] ? BOM.materials[ch.code].name : ch.code) });
+          const codes = mcGetCodes(ch);
+          overlapping.push({ productCode: pc, changeCode: codes.join('、'), changeName: codes.map(c => mcMatName(c)).join('、') });
         }
       });
     });
@@ -2670,37 +2819,6 @@ function mcRenderSimilarWarning() {
         items: Object.values(grouped).map(g => `${g.changeName} (${g.changeCode}): ${g.products.join(', ')}`)
       });
     }
-  }
-
-  const productItems = selCodes.map(pc => {
-    const p = BOM.products.find(pp => pp.code === pc);
-    return p ? p : { code: pc, name: '', items: [] };
-  });
-
-  const sharedMats = {};
-  productItems.forEach(p => {
-    (p.items || []).forEach(it => {
-      if (!it.c || it.a === '虚拟') return;
-      if (!sharedMats[it.c]) sharedMats[it.c] = [];
-      if (!sharedMats[it.c].includes(p.code)) sharedMats[it.c].push(p.code);
-    });
-  });
-
-  const sharedByAll = Object.entries(sharedMats).filter(([mc, prods]) => prods.length === selCodes.length && mc !== mcCurrentMaterialCode);
-  const partialShared = Object.entries(sharedMats).filter(([mc, prods]) => prods.length > 1 && prods.length < selCodes.length && mc !== mcCurrentMaterialCode);
-
-  if (partialShared.length > 0) {
-    const items = partialShared.map(([mc, prods]) => {
-      const m = BOM.materials[mc];
-      const mName = m ? m.name : mc;
-      const included = prods;
-      const excluded = selCodes.filter(c => !included.includes(c));
-      return `${mName} (${mc}): ${included.length}个成品共用，但 ${excluded.map(c => { const p = BOM.products.find(pp => pp.code === c); return p ? p.name : c; }).join('、')} 不含此料`;
-    });
-    warnings.push({
-      title: '部分成品共用物料但非全部一致，注意检查',
-      items
-    });
   }
 
   if (warnings.length === 0) { warnEl.innerHTML = ''; return; }
@@ -2813,19 +2931,19 @@ function getOrderReminders(order) {
   }
 
   pendingChanges.forEach(ch => {
+    const codes = mcGetCodes(ch);
+    const names = codes.map(c => BOM.materials[c] ? BOM.materials[c].name : (ch.name || c)).join('、');
     if (isProductInChange(ch, productCode)) {
-      const mat = BOM.materials[ch.code];
       productChanges.push({
-        code: ch.code,
-        name: mat ? mat.name : (ch.name || ch.code),
+        code: codes.join('、'),
+        name: names,
         type: ch.type,
         notes: ch.notes || ''
       });
-    } else if (bomMaterialCodes.has(ch.code)) {
-      const mat = BOM.materials[ch.code];
+    } else if (codes.some(c => bomMaterialCodes.has(c))) {
       bomChanges.push({
-        code: ch.code,
-        name: mat ? mat.name : (ch.name || ch.code),
+        code: codes.join('、'),
+        name: names,
         type: ch.type,
         notes: ch.notes || ''
       });
