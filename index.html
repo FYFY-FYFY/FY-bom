@@ -1,4 +1,6 @@
-<html lang="zh-CN"><head>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BOM 库存与产能管理工具</title>
@@ -576,9 +578,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <p><code>物料编码</code> Tab <code>库存</code> Tab <code>在途</code> Tab <code>到货日期</code> Tab <code>单价</code></p>
       <p style="margin-top:4px;">可直接从 Excel 粘贴数据。也支持只填编码+库存两列。</p>
     </div>
-    <textarea id="batchInput" placeholder="示例：
-1.1.07.0502	100	50	2025-08-15	0.5
-2.2.0499.171	200	100	2025-08-18	15"></textarea>
+    <textarea id="batchInput" placeholder="示例：&#10;1.1.07.0502&#9;100&#9;50&#9;2025-08-15&#9;0.5&#10;2.2.0499.171&#9;200&#9;100&#9;2025-08-18&#9;15"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImport()">导入</button>
       <button class="btn" onclick="document.getElementById('batchInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -592,9 +592,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <p>每行一条：<code>成品编码</code> Tab <code>内部型号</code></p>
       <p style="margin-top:4px;">更新BOM后内部型号数据保留。</p>
     </div>
-    <textarea id="internalModelInput" placeholder="示例：
-HMICTAI508000001	T508-20-80
-HMICTAI7121VX500104	T7121-VX5"></textarea>
+    <textarea id="internalModelInput" placeholder="示例：&#10;HMICTAI508000001&#9;T508-20-80&#10;HMICTAI7121VX500104&#9;T7121-VX5"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImportInternalModels()">导入内部型号</button>
       <button class="btn" onclick="document.getElementById('internalModelInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -607,9 +605,7 @@ HMICTAI7121VX500104	T7121-VX5"></textarea>
       <p>每行一条：<code>成品编码</code> Tab <code>商务特性</code></p>
       <p style="margin-top:4px;">商务特性如：量产物料、试产物料、停产物料等。更新BOM后数据保留。</p>
     </div>
-    <textarea id="bizTraitsInput" placeholder="示例：
-HMICTAI508000001	量产物料
-HMICTAI7121VX500104	试产物料"></textarea>
+    <textarea id="bizTraitsInput" placeholder="示例：&#10;HMICTAI508000001&#9;量产物料&#10;HMICTAI7121VX500104&#9;试产物料"></textarea>
     <div class="batch-buttons">
       <button class="btn btn-primary" onclick="batchImportBizTraits()">导入商务特性</button>
       <button class="btn" onclick="document.getElementById('bizTraitsInput').value=''" style="background:#f1f5f9;">清空</button>
@@ -655,7 +651,7 @@ HMICTAI7121VX500104	试产物料"></textarea>
       <label style="font-size:13px;">GitHub 用户名<input type="text" id="cfgOwner" placeholder="例如 octocat" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
       <label style="font-size:13px;">仓库名称（不存在将自动新建）<input type="text" id="cfgRepo" placeholder="例如 bom-tool" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
       <label style="font-size:13px;">分支（默认 main）<input type="text" id="cfgBranch" value="main" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
-      <label style="font-size:13px;">同事访问密码<input type="text" id="cfgPassword" placeholder="默认 bom2026" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:13px;">同事访问密码<input type="text" id="cfgPassword" placeholder="输入访问密码" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
       <label style="font-size:13px;">Personal Access Token（需 repo 权限）<input type="password" id="cfgToken" placeholder="ghp_..." style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;margin-top:4px;"></label>
     </div>
     <div id="cfgUrlPreview" style="font-size:12px;color:var(--primary);margin-top:10px;word-break:break-all;"></div>
@@ -887,7 +883,7 @@ function openSettings() {
   document.getElementById('cfgOwner').value = cfg.owner || 'FYFY-FYFY';
   document.getElementById('cfgRepo').value = cfg.repo || 'FY-bom';
   document.getElementById('cfgBranch').value = cfg.branch || 'main';
-  document.getElementById('cfgPassword').value = cfg.password || 'SHFY123';
+  document.getElementById('cfgPassword').value = cfg.password || '';
   document.getElementById('cfgToken').value = cfg.token || '';
   updateUrlPreview();
   document.getElementById('deployModal').style.display = 'flex';
@@ -903,10 +899,11 @@ function saveSettingsFromForm() {
     owner: document.getElementById('cfgOwner').value.trim(),
     repo: document.getElementById('cfgRepo').value.trim(),
     branch: document.getElementById('cfgBranch').value.trim() || 'main',
-    password: document.getElementById('cfgPassword').value.trim() || 'bom2026',
+    password: document.getElementById('cfgPassword').value.trim(),
     token: document.getElementById('cfgToken').value.trim()
   };
   if (!cfg.owner || !cfg.repo || !cfg.token) { alert('请填写 GitHub 用户名、仓库名和 Token'); return; }
+  if (!cfg.password) { alert('请设置同事访问密码（用于加密数据，请妥善保管，勿泄露给无关人员）'); return; }
   saveDeployCfg(cfg);
   closeSettings();
   alert('✅ 设置已保存。\n\n现在点击右上角"☁ 上传同步"即可发布。');
@@ -1015,6 +1012,7 @@ async function ensurePages(cfg) {
 async function syncToOnline() {
   const cfg = loadDeployCfg();
   if (!cfg.owner || !cfg.repo || !cfg.token) { openSettings(); return; }
+  if (!cfg.password) { alert('请先在"⚙ 设置"里设置同事访问密码，再上传同步。'); openSettings(); return; }
   if (!window.crypto || !window.crypto.subtle) {
     alert('当前页面以 file:// 方式打开，浏览器禁用了加密接口，无法上传。\n\n请改用本地服务器打开后再上传：\n1) 双击本目录下的 start_server.bat\n2) 浏览器访问 http://localhost:3000/bom_tool.html\n3) 重新点"☁ 上传同步"\n\n（或使用 Firefox 直接打开本文件也可。）');
     return;
@@ -1036,7 +1034,7 @@ async function syncToOnline() {
       showSyncStatus('🔐 正在加密数据...（库存 ' + invCount + ' 条 / 关键物料 ' + keyCount + ' 个 / 安全库存 ' + safeCount + ' 条）');
     }
     const data = { bom: BOM, overrides };
-    const enc = await encryptText(JSON.stringify(data), cfg.password || 'bom2026');
+    const enc = await encryptText(JSON.stringify(data), cfg.password);
     const dataEncJson = JSON.stringify(enc);
 
     showSyncStatus('📦 正在生成在线页面...');
@@ -1056,7 +1054,7 @@ async function syncToOnline() {
 
     closeSyncStatus();
     const url = 'https://' + cfg.owner + '.github.io/' + cfg.repo + '/';
-    alert('✅ 同步完成！\n\n同事访问地址：\n' + url + '\n\n访问密码：' + (cfg.password || 'bom2026') + '\n（请勿泄露密码；同事打开后输入密码即可查看，你重新点上传同步他们刷新即见最新）');
+    alert('✅ 同步完成！\n\n同事访问地址：\n' + url + '\n\n访问密码：请单独告知同事（勿在聊天群/截图里明文发送）。\n（同事打开后输入密码即可查看，你重新点上传同步他们刷新即见最新）');
   } catch (e) {
     closeSyncStatus();
     const msg = (e && e.message ? e.message : String(e));
@@ -2856,5 +2854,5 @@ function showToast(msg) {
   setTimeout(() => t.remove(), 2500);
 }
 </script>
-
-</body></html>
+</body>
+</html>
