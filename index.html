@@ -211,7 +211,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .bom-table .level-indent-1 { padding-left: 18px !important; }
 .bom-table .level-indent-2 { padding-left: 36px !important; }
 .bom-table .level-indent-3 { padding-left: 54px !important; }
-.bom-table .code-cell { font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.bom-table .code-cell { font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bom-table .code-cell.key-mat { color: var(--danger); font-weight: 700; }
 .bom-table .spec-cell { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bom-table .num-cell { text-align: right; font-weight: 600; }
@@ -564,7 +564,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
     <!-- 筛选 -->
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:10px;">
       <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-        <input type="checkbox" id="spOnlyKey" onchange="renderStockPlanTab()" style="margin:0;">只看关键物料
+        <input type="checkbox" id="spOnlyKey" checked onchange="renderStockPlanTab()" style="margin:0;">只看关键物料
       </label>
       <select id="spFilterStatus" onchange="renderStockPlanTab()" style="padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
         <option value="">全部状态</option><option value="执行">执行中</option><option value="完成">已完成</option><option value="延期">延期</option><option value="取消">取消</option>
@@ -1892,7 +1892,7 @@ function renderProducts() {
       <div class="product-header" onclick="toggleProduct('${escCode}')">
         <span class="expand-icon">▶</span>
         <span class="product-col-code copyable-code" title="点击复制: ${product.code}" onclick="event.stopPropagation();copyToClipboard('${escCode}')">${product.code}</span>
-        <span class="product-col-desc" title="${escapeHtml(product.name)}${product.spec?' - '+escapeHtml(product.spec):''}">${product.name}${product.spec?' <span style="color:var(--text-muted);font-size:11px;">- '+escapeHtml(product.spec)+'</span>':''}</span>
+        <span class="product-col-desc" title="${escapeHtml(product.name)}${product.spec ? ' - ' + escapeHtml(product.spec) : ''}" style="cursor:default;">${product.spec ? '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(product.spec) + '</span>' : '<span style="color:var(--text-muted);">' + escapeHtml(product.name) + '</span>'}</span>
         <div class="product-col-internal"><input class="internal-input" value="${escapeHtml(im)}" placeholder="内部型号" onclick="event.stopPropagation()" onchange="updateInternalModel('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <div class="product-col-biz"><input class="biz-input" value="${escapeHtml(bt)}" placeholder="商务特性" onclick="event.stopPropagation()" onchange="updateBizTrait('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <span class="product-col-attr"><span class="attr-tag ${product.attr}">${product.attr}</span></span>
@@ -2085,8 +2085,8 @@ function renderBOMRow(node, pCode, depth, bottleneckSet) {
     rows += `<tr class="${rowCls.join(' ')}">
       <td>${toggle}</td>
       <td class="level-cell ${indentCls}">${node.level}</td>
-      <td class="code-cell${isKey?' key-mat':''}">${mat.c}</td>
-      <td>${escapeHtml(mat.n)}</td>
+      <td class="code-cell${isKey?' key-mat':''}" title="${escapeHtml(mat.c + ' ' + mat.n + ' ' + (mat.s || ''))}">${mat.c}</td>
+      <td title="${escapeHtml(mat.n + ' ' + (mat.s || ''))}">${escapeHtml(mat.n)}</td>
       <td class="spec-cell" title="${escapeHtml(mat.s)}">${mat.s}</td>
       <td><span class="attr-tag ${mat.a}">${mat.a}</span></td>
       <td>${mat.it?`<span class="type-tag ${mat.it}">${mat.it}</span>`:''}</td>
@@ -2500,7 +2500,7 @@ function spRenderEntryRows() {
   spEntryRows.forEach((r, i) => {
     h += '<div style="display:grid;grid-template-columns:24px 1fr 46px 46px 56px 1.3fr;gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:#fff;">';
     h += '<input type="checkbox" ' + (r.checked ? 'checked' : '') + ' onchange="spEntryToggle(' + i + ',this.checked)" style="margin:0;">';
-    h += '<span title="' + escapeHtml(r.spec || '') + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong style="font-family:monospace;">' + escapeHtml(r.code) + '</strong>' + (r.name ? ' ' + escapeHtml(r.name) : '') + '</span>';
+    h += '<span title="' + escapeHtml(r.code + ' ' + r.name + ' ' + (r.spec || '')) + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong style="font-family:monospace;">' + escapeHtml(r.code) + '</strong>' + (r.name ? ' ' + escapeHtml(r.name) : '') + '</span>';
     h += '<span style="color:' + (r.stock > 0 ? 'var(--success)' : 'var(--danger)') + ';">' + r.stock + '</span>';
     h += '<span style="color:' + (r.transit > 0 ? 'var(--warning)' : 'var(--text-muted)') + ';">' + r.transit + '</span>';
     h += '<input type="number" min="0" value="' + r.qty + '" onchange="spEntryQtyChange(' + i + ',this.value)" style="width:100%;padding:3px 4px;border:1px solid var(--border-strong);border-radius:5px;font-size:11px;text-align:center;">';
@@ -2566,6 +2566,7 @@ function spPlanStats() {
   let exe = 0, done = 0, delay = 0, cancel = 0, due = 0;
   stockPlans.forEach(p => {
     Object.entries(p.items).forEach(([code, it]) => {
+      if (!keyMaterials.has(code)) return; // 备料管理只看关键物料
       if (it.status === '执行') { exe++; if (spItemDue(p, code, it)) due++; }
       else if (it.status === '完成') done++;
       else if (it.status === '延期') delay++;
@@ -2689,10 +2690,12 @@ function renderStockPlanTab() {
   let h = '';
   plans.forEach(p => {
     const subject = spTopicSubject(p);
-    const entries = Object.entries(p.items);
+    const allEntries = Object.entries(p.items);
+    const entries = allEntries.filter(([c]) => keyMaterials.has(c)); // 只看关键物料
+    const noKeyEntry = entries.length === 0;
     const doneN = entries.filter(([, it]) => it.status === '完成').length;
     const activeN = entries.filter(([, it]) => it.status === '执行' || it.status === '延期').length;
-    const hasDue = spTopicHasDue(p);
+    const hasDue = entries.some(([c, it]) => spItemDue(p, c, it));
     const expanded = expandedSpTopics.has(p.id);
     // 主题状态：全部完成=完成，有执行/延期=未完成
     const allDone = activeN === 0 && doneN > 0;
@@ -2716,18 +2719,25 @@ function renderStockPlanTab() {
     h += stBadge;
     h += etaInfo;
     h += `<span style="font-size:10px;color:var(--text-muted);">${fmtDate(p.createdAt)}</span>`;
-    h += `<span style="margin-left:auto;font-size:10px;color:var(--text-muted);">${entries.length}项</span>`;
+    h += `<span style="margin-left:auto;font-size:10px;color:var(--text-muted);">${noKeyEntry ? '非关键' + allEntries.length + '项' : '关键' + entries.length + '项'}</span>`;
     h += `<button class="btn btn-xs btn-danger" onclick="event.stopPropagation();spDeletePlan('${p.id}')">✕</button>`;
     h += '</div>';
     if (expanded) {
       h += '<div style="padding:0 12px 10px;">';
-      h += '<div style="display:grid;grid-template-columns:1.2fr 50px 60px 60px 90px 130px;gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
-      h += '<span>物料</span><span>数量</span><span>状态</span><span>预计到货</span><span>在途变化</span><span>备注</span></div>';
+      if (noKeyEntry) {
+        h += `<div style="font-size:11px;color:var(--text-muted);padding:8px;background:#f8fafc;border-radius:6px;margin-top:6px;">🔒 该主题无关键物料（共 ${allEntries.length} 项非关键备料），备料管理仅展示关键物料</div>`;
+      } else {
+        h += '<div style="display:grid;grid-template-columns:1.6fr 50px 60px 60px 90px 130px;gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
+        h += '<span>物料（仅关键）</span><span>数量</span><span>状态</span><span>预计到货</span><span>在途变化</span><span>备注</span></div>';
+      }
       entries.forEach(([code, it]) => {
         const eta = spPlanEta(p, code);
+        const m = BOM.materials[code];
+        const mName = m ? (m.name || '') : '';
+        const mSpec = m ? (m.spec || '') : '';
         const stCls = it.status === '完成' ? '#166534' : (it.status === '延期' ? '#b45309' : (it.status === '取消' ? '#64748b' : (spItemDue(p, code, it) ? '#b91c1c' : '#1d4ed8')));
-        h += '<div style="display:grid;grid-template-columns:1.2fr 50px 60px 60px 90px 130px;gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;">';
-        h += `<span style="font-family:monospace;font-weight:600;">${code}</span>`;
+        h += '<div style="display:grid;grid-template-columns:1.6fr 50px 60px 60px 90px 130px;gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;">';
+        h += `<span title="${escapeHtml(code + ' ' + mName + ' ' + mSpec)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-family:monospace;font-weight:600;">${code}</span>${mName ? ' <span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(mName) + '</span>' : ''}</span>`;
         h += `<span class="num">${it.qty}</span>`;
         h += `<span>`;
         SP_STATUS.forEach(s => {
