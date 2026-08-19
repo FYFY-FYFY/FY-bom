@@ -520,6 +520,14 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
         <input type="text" id="spMaterialCode" placeholder="物料编码，如 PCBA..." style="width:150px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;display:none;" list="spMaterialList">
         <datalist id="spMaterialList"></datalist>
         <input type="number" id="spDefaultQty" placeholder="默认数量200" style="width:100px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;" min="0">
+        <div id="spQuickKeys" style="display:none;flex-basis:100%;margin-top:4px;font-size:11px;color:var(--text-muted);">⚡ 关键物料一键勾选:
+          <button class="btn btn-xs" onclick="spQuickKey('PCBA')">PCBA</button>
+          <button class="btn btn-xs" onclick="spQuickKey('TP液晶')">TP液晶</button>
+          <button class="btn btn-xs" onclick="spQuickKey('触控膜')">触控膜</button>
+          <button class="btn btn-xs" onclick="spQuickKey('液晶')">液晶</button>
+          <button class="btn btn-xs" onclick="spQuickKey('前壳')">前壳</button>
+          <button class="btn btn-xs" onclick="spQuickKey('后壳')">后壳</button>
+        </div>
         <button class="btn btn-sm btn-primary" onclick="spLoadBOM()">列出第一层BOM</button>
         <button class="btn btn-sm btn-primary" onclick="spCreatePlan()">创建备料主题</button>
         <span style="font-size:11px;color:var(--text-muted);">勾选✓后自动生成备注"日期 型号 备料N"（可改）| 备料不加入在途 | 在途变化右侧显示箭头(红↑增/绿↓减)</span>
@@ -2410,9 +2418,46 @@ function spToggleMode() {
   spEntryMode = document.querySelector('input[name="spMode"]:checked').value;
   document.getElementById('spProductCode').style.display = spEntryMode === 'product' ? '' : 'none';
   document.getElementById('spMaterialCode').style.display = spEntryMode === 'material' ? '' : 'none';
+  document.getElementById('spQuickKeys').style.display = spEntryMode === 'material' ? '' : 'none';
   spEntryRows = [];
   spNoteTouched = {};
   spRenderEntryRows();
+}
+
+// 关键物料一键勾选：按名称/规格匹配物料并加入待备料行(自动勾选)
+function spQuickKey(label) {
+  if (document.querySelector('input[name="spMode"]:checked').value !== 'material') {
+    document.querySelector('input[name="spMode"][value="material"]').checked = true;
+    spToggleMode();
+  }
+  const qty = parseInt(document.getElementById('spDefaultQty').value) || 200;
+  const matched = [];
+  for (const [code, m] of Object.entries(BOM.materials)) {
+    if (m.a === '虚拟') continue;
+    const text = ((m.name || '') + ' ' + (m.spec || '')).toUpperCase();
+    let ok = false;
+    if (label === 'PCBA') ok = text.includes('PCBA');
+    else if (label === 'TP液晶') ok = text.includes('TP') && text.includes('液晶');
+    else if (label === '触控膜') ok = text.includes('触控膜');
+    else if (label === '液晶') ok = text.includes('液晶') && !text.includes('TP') && !text.includes('触控');
+    else if (label === '前壳') ok = text.includes('前壳');
+    else if (label === '后壳') ok = text.includes('后壳');
+    if (ok) matched.push(code);
+  }
+  const result = document.getElementById('spEntryResult');
+  if (matched.length === 0) {
+    if (result) result.innerHTML = '<span style="color:var(--danger);">未找到名称/规格含「' + label + '」的物料</span>';
+    return;
+  }
+  const limited = matched.slice(0, 10);
+  limited.forEach(code => {
+    const exist = spEntryRows.find(r => r.code === code);
+    if (exist) { exist.checked = true; return; }
+    const m = BOM.materials[code] || {};
+    spEntryRows.push({ code, name: m.name || '', spec: m.spec || '', stock: getStock(code), transit: getTransit(code), qty, note: spAutoNote(code, qty), checked: true });
+  });
+  spRenderEntryRows();
+  if (result) result.innerHTML = '<span style="color:var(--success);">✓ 已一键勾选 ' + limited.length + ' 个「' + label + '」物料' + (matched.length > 10 ? '（匹配较多，仅取前10个，可取消多余）' : '') + '，数量默认 ' + qty + '，可修改后创建主题</span>';
 }
 
 function spLoadBOM() {
