@@ -523,8 +523,32 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <button class="btn btn-sm" onclick="deselectAllFilteredKey()">取消当前</button>
       <button class="btn btn-sm btn-danger" onclick="clearKeyMaterials()">清除全部</button>
     </div>
-    <!-- 备料录入 -->
-    <div style="background:#f0f9ff;padding:12px;border-radius:8px;margin-bottom:10px;border:1px solid #bae6fd;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;background:#f0f9ff;border:1px solid #bae6fd;padding:10px 12px;border-radius:8px;">
+      <span style="font-weight:600;">📦 备料录入已移至「备料管理」页顶部</span>
+      <button class="btn btn-sm btn-primary" onclick="goStockEntry()">去备料录入 →</button>
+    </div>
+    <div class="km-quick-select" id="kmQuickSelect"></div>
+    <div style="max-height:500px;overflow-y:auto;">
+      <table class="km-table" id="kmManageTable"></table>
+    </div>
+  </div>
+  <div class="km-panel" id="kmSummaryPanel" style="display:none;">
+    <h3 style="margin-bottom:8px;">关键物料库存与产能汇总</h3>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">汇总所有关键物料的库存、在途、备料、总需求及可支撑套数。库存颜色: <span style="color:#166534;background:#dcfce7;">绿</span>=充足(≥安全库存) <span style="color:#c2410c;background:#ffedd5;">橙</span>=低于安全库存 <span style="color:#b91c1c;background:#fee2e2;">红</span>=零库存且无替代。备料列右侧箭头: <span style="color:var(--danger);">红↑</span>=在途增加 <span style="color:var(--success);">绿↓</span>=在途减少。列头可点击排序。</p>
+    <div style="max-height:600px;overflow-y:auto;">
+      <table class="km-table" id="kmSummaryTable"></table>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Stock Plan -->
+<div class="tab-content" id="tab-stockplan">
+  <div class="mc-panel">
+    <div class="section-title">📦 备料管理 <span class="count" id="spTabCount">(0个主题)</span></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">按"备料主题"（一次备料动作）分组查看。每条物料记录自动带创建时间，状态可切换 执行/完成/延期/取消。预计到货 = 备料时间 + 物料货期（PCBA/全贴合TP液晶90天、触控膜/液晶45天、前后壳30天，可按物料名自动匹配或手动改）。即将到期(≤15天)会提醒去和采购核对。</p>
+
+    <!-- 备料录入（已从「关键物料」迁移至此，最上面） -->
+    <div style="background:#f0f9ff;padding:12px;border-radius:8px;margin-bottom:12px;border:1px solid #bae6fd;">
       <div style="font-weight:600;font-size:13px;margin-bottom:6px;">📦 备料录入</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;">
         <label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="radio" name="spMode" value="product" checked onchange="spToggleMode()" style="margin:0;">按成品</label>
@@ -553,25 +577,6 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <div id="spEntryRows" style="margin-top:8px;"></div>
       <div id="spEntryResult" style="margin-top:6px;font-size:11px;"></div>
     </div>
-    <div class="km-quick-select" id="kmQuickSelect"></div>
-    <div style="max-height:500px;overflow-y:auto;">
-      <table class="km-table" id="kmManageTable"></table>
-    </div>
-  </div>
-  <div class="km-panel" id="kmSummaryPanel" style="display:none;">
-    <h3 style="margin-bottom:8px;">关键物料库存与产能汇总</h3>
-    <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">汇总所有关键物料的库存、在途、备料、总需求及可支撑套数。库存颜色: <span style="color:#166534;background:#dcfce7;">绿</span>=充足(≥安全库存) <span style="color:#c2410c;background:#ffedd5;">橙</span>=低于安全库存 <span style="color:#b91c1c;background:#fee2e2;">红</span>=零库存且无替代。备料列右侧箭头: <span style="color:var(--danger);">红↑</span>=在途增加 <span style="color:var(--success);">绿↓</span>=在途减少。列头可点击排序。</p>
-    <div style="max-height:600px;overflow-y:auto;">
-      <table class="km-table" id="kmSummaryTable"></table>
-    </div>
-  </div>
-</div>
-
-<!-- Tab: Stock Plan -->
-<div class="tab-content" id="tab-stockplan">
-  <div class="mc-panel">
-    <div class="section-title">📦 备料管理 <span class="count" id="spTabCount">(0个主题)</span></div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">按"备料主题"（一次备料动作）分组查看。每条物料记录自动带创建时间，状态可切换 执行/完成/延期/取消。预计到货 = 备料时间 + 物料货期（PCBA/全贴合TP液晶90天、触控膜/液晶45天、前后壳30天，可按物料名自动匹配或手动改）。即将到期(≤15天)会提醒去和采购核对。</p>
 
     <!-- 提醒概览 -->
     <div id="spReminderOverview" style="margin-bottom:12px;"></div>
@@ -1381,10 +1386,21 @@ const SPG_MIN = 40;
 let spgWidths = {}, sptWidths = {};
 let spColResizeState = null;
 
+function spNormWidths(defs, saved) {
+  const w = Object.assign({}, defs);
+  if (saved && typeof saved === 'object') {
+    Object.entries(saved).forEach(([k, v]) => {
+      if (defs[k] === undefined) return; // 未知列忽略
+      const n = Math.round(Number(v));
+      if (isFinite(n) && n >= SPG_MIN) w[k] = n;
+    });
+  }
+  return w;
+}
 function initSpColResizers() {
-  try { spgWidths = Object.assign({}, SPG_DEFAULTS, JSON.parse(localStorage.getItem('bom_spg_widths') || '{}')); }
+  try { spgWidths = spNormWidths(SPG_DEFAULTS, JSON.parse(localStorage.getItem('bom_spg_widths') || '{}')); }
   catch(e) { spgWidths = Object.assign({}, SPG_DEFAULTS); }
-  try { sptWidths = Object.assign({}, SPT_DEFAULTS, JSON.parse(localStorage.getItem('bom_spt_widths') || '{}')); }
+  try { sptWidths = spNormWidths(SPT_DEFAULTS, JSON.parse(localStorage.getItem('bom_spt_widths') || '{}')); }
   catch(e) { sptWidths = Object.assign({}, SPT_DEFAULTS); }
   applySpColWidths();
 }
@@ -2759,7 +2775,7 @@ function spRenderEntryRows() {
   if (!c) return;
   if (spEntryRows.length === 0) { c.innerHTML = ''; return; }
   let h = '<div style="border:1px solid #bae6fd;border-radius:8px;overflow:hidden;">';
-  h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:6px 10px;background:#e0f2fe;font-weight:600;font-size:11px;color:#075985;align-items:center;">';
+  h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) 1.3fr;gap:6px;padding:6px 10px;background:#e0f2fe;font-weight:600;font-size:11px;color:#075985;align-items:center;">';
   h += '<span>✓</span><span>物料</span>';
   h += '<span style="position:relative;">库存<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'stock\')" onclick="event.stopPropagation()"></span></span>';
   h += '<span style="position:relative;">在途<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'transit\')" onclick="event.stopPropagation()"></span></span>';
@@ -2769,7 +2785,7 @@ function spRenderEntryRows() {
   spEntryRows.forEach((r, i) => {
     const isAppend = r.spType === 'append';
     const gap = Math.max((parseInt(r.qty) || 0) - (r.stock || 0) - (r.transit || 0), 0); // 缺口=需求-库存-在途
-    h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:' + (r.alt ? '#fffbeb' : '#fff') + ';">';
+    h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) 1.3fr;gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:' + (r.alt ? '#fffbeb' : '#fff') + ';">';
     h += '<input type="checkbox" ' + (r.checked ? 'checked' : '') + ' onchange="spEntryToggle(' + i + ',this.checked)" style="margin:0;">';
     h += '<span title="' + escapeHtml(r.code + ' ' + r.name + ' ' + (r.spec || '')) + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong style="font-family:monospace;">' + escapeHtml(r.code) + '</strong>' + (r.name ? ' ' + escapeHtml(r.name) : '') + (r.spec ? ' <span style="color:#075985;font-size:10px;">' + escapeHtml(r.spec) + '</span>' : '') + (r.alt ? ' <span style="background:#fef3c7;color:#b45309;font-size:9px;padding:0 4px;border-radius:4px;">替代</span>' : '') + '</span>';
     h += '<span style="color:' + (r.stock > 0 ? 'var(--success)' : 'var(--danger)') + ';">' + r.stock + '</span>';
@@ -2791,11 +2807,11 @@ function spRenderEntryRows() {
     h += '<input type="text" value="' + escapeHtml(r.note) + '" oninput="spEntryNoteChange(' + i + ',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-strong);border-radius:5px;font-size:11px;">';
     h += '</div>';
     if (!isAppend && gap > 0) {
-      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:#b45309;background:#fff;">';
+      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:#b45309;background:#fff;">';
       h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">⚠️ 需求' + (r.qty || 0) + '-库存' + (r.stock || 0) + '-在途' + (r.transit || 0) + '=缺口 ' + gap + '，已自动记入补货（可改大）</span><span></span>';
       h += '</div>';
     } else if (!isAppend && (r.qty || 0) > 0) {
-      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
+      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
       h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">✓ 库存' + (r.stock || 0) + '+在途' + (r.transit || 0) + '已满足需求' + (r.qty || 0) + '，无需补货</span><span></span>';
       h += '</div>';
     }
@@ -3079,8 +3095,9 @@ function spToggleTopicExpand(planId) {
 }
 
 function goStockEntry() {
-  switchTab('keymaterials');
-  document.getElementById('spEntryRows').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  switchTab('stockplan');
+  const el = document.getElementById('spEntryRows');
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ---- 按物料查看：一个物料在多个备料计划中的备料信息（统计+展开） ----
@@ -3268,7 +3285,7 @@ function renderStockPlanTab() {
       if (onlyKey && noKeyEntry) {
         h += `<div style="font-size:11px;color:var(--text-muted);padding:8px;background:#f8fafc;border-radius:6px;margin-top:6px;">🔒 该主题无关键物料（共 ${allEntries.length} 项非关键备料），备料管理仅展示关键物料</div>`;
       } else {
-        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty) var(--spt-status) var(--spt-eta) var(--spt-transit) var(--spt-note);gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
+        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty,70px) var(--spt-status,60px) var(--spt-eta,60px) var(--spt-transit,90px) var(--spt-note,130px);gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
         h += '<span>物料' + (onlyKey ? '（仅关键）' : '') + '</span>';
         h += '<span style="position:relative;">备料量<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'qty\')" onclick="event.stopPropagation()"></span></span>';
         h += '<span style="position:relative;">状态<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'status\')" onclick="event.stopPropagation()"></span></span>';
@@ -3282,10 +3299,10 @@ function renderStockPlanTab() {
         const mName = m ? (m.name || '') : '';
         const mSpec = m ? (m.spec || '') : '';
         const stCls = it.status === '完成' ? '#166534' : (it.status === '延期' ? '#b45309' : (it.status === '取消' ? '#64748b' : (spItemDue(p, code, it) ? '#b91c1c' : '#1d4ed8')));
-        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty) var(--spt-status) var(--spt-eta) var(--spt-transit) var(--spt-note);gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;' + (keyMaterials.has(code) ? 'background:#fef2f2;' : '') + '>';
+        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty,70px) var(--spt-status,60px) var(--spt-eta,60px) var(--spt-transit,90px) var(--spt-note,130px);gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;' + (keyMaterials.has(code) ? 'background:#fef2f2;' : '') + '>';
         h += `<span title="${escapeHtml(code + ' ' + mName + ' ' + mSpec)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-family:monospace;font-weight:600;">${code}</span>${mName ? ' <span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(mName) + '</span>' : ''}${mSpec ? ' <span style="color:#075985;font-size:10px;">' + escapeHtml(mSpec) + '</span>' : ''}${keyMaterials.has(code) ? ' <span style="color:#dc2626;" title="关键物料">★</span>' : ''}</span>`;
         h += `<span class="num" style="font-size:10px;line-height:1.5;text-align:center;">${spQtyCell(it)}</span>`;
-        h += `<span>`;
+        h += `<span style="display:flex;flex-wrap:wrap;gap:2px;align-items:center;min-width:0;">`;
         if (keyMaterials.has(code)) { // 关键物料：来料确认（弹窗确认数量，确认后完成；可改延期/预期到货）
           h += `<span onclick="spArriveConfirm('${p.id}','${code}')" style="cursor:pointer;font-size:10px;padding:1px 5px;border-radius:6px;margin-right:2px;background:#fee2e2;color:#b91c1c;font-weight:700;" title="关键物料来料：确认实际来料数量后标记完成；延期可修改预期到货时间">📦来料</span>`;
         }
@@ -3363,7 +3380,7 @@ function renderDashboard() {
       spBody += `<div style="border:1px solid #fecaca;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#fff5f5;cursor:pointer;" onclick="switchTab('stockplan')">
         <div style="font-size:11px;font-weight:700;">${escapeHtml(spTopicSubject(p))} <span style="color:#b91c1c;">⏳未完成 ${act.length}项</span></div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${spTopicMeta(p)}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${etaTxt}${dueTxt} | ${act.map(([c]) => c).join('、')}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${etaTxt}${dueTxt} | ${act.map(([c]) => keyMaterials.has(c) ? (BOM.materials[c] ? BOM.materials[c].name || c : c) : c).join('、')}</div>
       </div>`;
     });
   }
