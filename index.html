@@ -925,6 +925,7 @@ function initApp() {
   updateSpProductList();
   applyOnlineVisibility();
   renderProductionOrders();
+  spLoadExpanded();
   renderStockPlanTab();
   renderDashboard();
   updateReminderBell();
@@ -1343,6 +1344,7 @@ function hardReset() {
   localStorage.removeItem('bom_production_orders');
   localStorage.removeItem('bom_stock_plans');
   localStorage.removeItem('bom_lead_time_overrides');
+  localStorage.removeItem(SP_EXPANDED_KEY);
   // Reset state
   inventory = {};
   keyMaterials = new Set();
@@ -3108,6 +3110,8 @@ function spCloseArriveModal() {
 function spDeletePlan(planId) {
   if (!confirm('确定删除该备料主题？')) return;
   stockPlans = stockPlans.filter(x => x.id !== planId);
+  expandedSpTopics.delete(planId);
+  spSaveExpanded();
   saveToStorage();
   renderStockPlanTab();
   renderKeySummary();
@@ -3118,7 +3122,37 @@ function spDeletePlan(planId) {
 function spToggleTopicExpand(planId) {
   if (expandedSpTopics.has(planId)) expandedSpTopics.delete(planId);
   else expandedSpTopics.add(planId);
+  spSaveExpanded();
   renderStockPlanTab();
+}
+
+// 首页备料现状卡片点击：跳转备料管理页 + 自动展开该主题详情
+function spGoPlan(planId) {
+  switchTab('stockplan');
+  // 清空筛选，确保目标主题一定可见
+  const fs = document.getElementById('spFilterStatus'); if (fs) fs.value = '';
+  const fk = document.getElementById('spFilterKind'); if (fk) fk.value = '';
+  const ft = document.getElementById('spFilterText'); if (ft) ft.value = '';
+  expandedSpTopics.add(planId);
+  spSaveExpanded();
+  renderStockPlanTab();
+  // 展开后滚动到该主题卡片
+  setTimeout(() => {
+    const el = document.getElementById('sp-plan-' + planId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 60);
+}
+
+// 展开状态持久化：刷新/重进后保持主题展开（避免"刷新后再展开不见了"）
+const SP_EXPANDED_KEY = 'bom_sp_expanded';
+function spSaveExpanded() {
+  try { localStorage.setItem(SP_EXPANDED_KEY, JSON.stringify([...expandedSpTopics])); } catch (e) {}
+}
+function spLoadExpanded() {
+  try {
+    const v = localStorage.getItem(SP_EXPANDED_KEY);
+    if (v) { const arr = JSON.parse(v); if (Array.isArray(arr)) expandedSpTopics = new Set(arr); }
+  } catch (e) {}
 }
 
 function goStockEntry() {
@@ -3293,7 +3327,7 @@ function renderStockPlanTab() {
       etas.sort((a, b) => a.eta - b.eta);
       if (etas.length > 0) etaInfo = `<span style="font-size:11px;color:#b45309;">预计交期: <strong>${fmtDate(etas[0].eta)}</strong>${etas.length > 1 ? ' 起' : ''}</span>`;
     }
-    h += `<div style="border:1px solid ${hasDue && !allDone ? '#fca5a5' : 'var(--border-strong)'};border-radius:10px;margin-bottom:8px;background:${hasDue && !allDone ? '#fffbf5' : '#fff'};overflow:hidden;">`;
+    h += `<div id="sp-plan-${p.id}" style="border:1px solid ${hasDue && !allDone ? '#fca5a5' : 'var(--border-strong)'};border-radius:10px;margin-bottom:8px;background:${hasDue && !allDone ? '#fffbf5' : '#fff'};overflow:hidden;">`;
     h += `<div style="cursor:pointer;" onclick="spToggleTopicExpand('${p.id}')">`;
     h += `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px 2px;">`;
     h += `<span style="font-size:10px;color:var(--text-muted);transform:rotate(${expanded ? 90 : 0}deg);transition:.2s;">▶</span>`;
@@ -3404,20 +3438,23 @@ function renderDashboard() {
       const etas = act.map(([c, it]) => ({ c, eta: spPlanEta(p, c) })).filter(x => x.eta).sort((a, b) => a.eta - b.eta);
       const etaTxt = etas.length > 0 ? `预计交期 ${fmtDate(etas[0].eta)}` : '';
       const dueTxt = spTopicHasDue(p) ? '<span style="color:#b91c1c;font-weight:800;"> ⚠即将到期</span>' : '';
-      spBody += `<div style="border:1px solid #fecaca;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#fff5f5;cursor:pointer;" onclick="switchTab('stockplan')">
+      const keyN = act.filter(([c]) => keyMaterials.has(c)).length;
+      spBody += `<div style="border:1px solid #fecaca;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#fff5f5;cursor:pointer;" onclick="spGoPlan('${p.id}')" title="点击跳转备料管理并展开该主题详情">
         <div style="font-size:11px;font-weight:700;">${escapeHtml(spTopicSubject(p))} <span style="color:#b91c1c;">⏳未完成 ${act.length}项</span></div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${spTopicMeta(p)}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${etaTxt}${dueTxt} | ${act.map(([c]) => keyMaterials.has(c) ? (BOM.materials[c] ? BOM.materials[c].name || c : c) : c).join('、')}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${etaTxt}${dueTxt}${keyN > 0 ? ` | 关键料 ${keyN} 项` : ''}</div>
       </div>`;
     });
   }
   if (donePlans.length > 0) {
     spBody += '<div style="font-size:11px;color:#166534;font-weight:700;margin:6px 0 4px;">已完成：</div>';
     donePlans.forEach(p => {
-      spBody += `<div style="border:1px solid #bbf7d0;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#f0fdf4;cursor:pointer;" onclick="switchTab('stockplan')">
+      const totalN = Object.entries(p.items).length;
+      const keyN = Object.entries(p.items).filter(([c]) => keyMaterials.has(c)).length;
+      spBody += `<div style="border:1px solid #bbf7d0;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#f0fdf4;cursor:pointer;" onclick="spGoPlan('${p.id}')" title="点击跳转备料管理并展开该主题详情">
         <div style="font-size:11px;font-weight:700;">${escapeHtml(spTopicSubject(p))} <span style="color:#166534;">✓已完成</span></div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${spTopicMeta(p)}</div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${Object.entries(p.items).length}项物料 | ${fmtDate(p.createdAt)}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${totalN}项物料${keyN > 0 ? `（关键 ${keyN}）` : ''} | ${fmtDate(p.createdAt)}</div>
       </div>`;
     });
   }
