@@ -597,6 +597,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       </select>
       <input type="text" id="spFilterText" placeholder="搜索主题/物料编码/型号/内部型号/备注" oninput="renderStockPlanTab()" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
       <button class="btn btn-sm btn-primary" onclick="goStockEntry()">＋ 新建备料</button>
+      <button class="btn btn-sm" onclick="spOpenRecords()" style="border:1px solid #c7d2fe;color:#4338ca;background:#eef2ff;" title="查询已完成/已取消等全部历史备料记录（记录永久保留，可随时查询）">📜 记录查询</button>
     </div>
 
     <!-- 按物料查看：一个物料出现在多个备料计划时，统计并展开各计划里的备料信息 -->
@@ -820,6 +821,30 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <button class="btn" onclick="spArriveDelay()" style="background:#fef3c7;color:#b45309;">⏳ 延期</button>
       <button class="btn btn-primary" onclick="spArriveComplete()">✓ 确认来料（完成）</button>
     </div>
+  </div>
+</div>
+
+<!-- 备料记录查询：已完成/已取消等历史主题记录永久保留，可随时查询 -->
+<div class="modal-overlay" id="spRecordsModal">
+  <div class="modal" style="max-width:780px;">
+    <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">📜 备料记录查询
+      <span style="font-size:11px;color:var(--text-muted);font-weight:400;">已完成/已取消等历史记录均保留在此，不会自动清除，可随时查询</span>
+    </h3>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px;">
+      <input type="text" id="spRecText" placeholder="关键字：主题标题/编码/物料名/规格/备注" oninput="spRunRecordsQuery()" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
+      <select id="spRecStatus" onchange="spRunRecordsQuery()" style="padding:6px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
+        <option value="">全部状态</option><option value="active">进行中</option><option value="done">已完成</option><option value="cancel">已取消</option>
+      </select>
+      <label style="font-size:11px;color:var(--text-muted);">创建日期
+        <input type="date" id="spRecFrom" onchange="spRunRecordsQuery()" style="padding:5px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
+      </label>
+      <span style="color:var(--text-muted);font-size:11px;">至</span>
+      <input type="date" id="spRecTo" onchange="spRunRecordsQuery()" style="padding:5px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
+      <button class="btn btn-sm" onclick="spResetRecords()">重置</button>
+      <button class="btn btn-sm" onclick="spCloseRecords()" style="background:#f1f5f9;">关闭</button>
+    </div>
+    <div id="spRecSummary" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"></div>
+    <div id="spRecList" style="max-height:52vh;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -3108,7 +3133,7 @@ function spCloseArriveModal() {
 }
 
 function spDeletePlan(planId) {
-  if (!confirm('确定删除该备料主题？')) return;
+  if (!confirm('确定删除该备料主题？删除后其记录将无法在「记录查询」中找回。')) return;
   stockPlans = stockPlans.filter(x => x.id !== planId);
   expandedSpTopics.delete(planId);
   spSaveExpanded();
@@ -3153,6 +3178,131 @@ function spLoadExpanded() {
     const v = localStorage.getItem(SP_EXPANDED_KEY);
     if (v) { const arr = JSON.parse(v); if (Array.isArray(arr)) expandedSpTopics = new Set(arr); }
   } catch (e) {}
+}
+
+// ============= 备料记录查询：已完成/已取消等历史记录保留并可查询 =============
+function spOpenRecords() {
+  document.getElementById('spRecordsModal').classList.add('active');
+  spRunRecordsQuery();
+}
+function spCloseRecords() {
+  document.getElementById('spRecordsModal').classList.remove('active');
+}
+function spResetRecords() {
+  document.getElementById('spRecText').value = '';
+  document.getElementById('spRecStatus').value = '';
+  document.getElementById('spRecFrom').value = '';
+  document.getElementById('spRecTo').value = '';
+  spRunRecordsQuery();
+}
+// 主题状态：'active' 进行中 / 'done' 已完成（全部完成）/ 'cancel' 已取消（其余）
+function spRecTopicState(p) {
+  const entries = Object.values(p.items || {});
+  if (!entries.length) return 'cancel';
+  const activeN = entries.filter(it => it.status === '执行' || it.status === '延期').length;
+  const doneN = entries.filter(it => it.status === '完成').length;
+  if (activeN > 0) return 'active';
+  if (doneN > 0) return 'done';
+  return 'cancel';
+}
+// 主题结束时间：取所有物料最后一次状态变更时间（无变更则用创建时间）
+function spRecEndTime(p) {
+  let t = 0;
+  Object.values(p.items || {}).forEach(it => { if (it.updatedAt) t = Math.max(t, it.updatedAt); });
+  return t || p.createdAt || 0;
+}
+function spRecToggle(id) {
+  const el = document.getElementById('spRecDetail-' + id);
+  const arr = document.getElementById('spRecArrow-' + id);
+  if (!el) return;
+  const show = el.style.display !== 'none';
+  el.style.display = show ? 'none' : '';
+  if (arr) arr.style.transform = show ? '' : 'rotate(90deg)';
+}
+function spRunRecordsQuery() {
+  const list = document.getElementById('spRecList');
+  if (!list) return;
+  const txt = (document.getElementById('spRecText').value || '').toLowerCase().trim();
+  const st = document.getElementById('spRecStatus').value;
+  const from = document.getElementById('spRecFrom').value; // yyyy-mm-dd
+  const to = document.getElementById('spRecTo').value;
+  const fromT = from ? new Date(from + 'T00:00:00').getTime() : 0;
+  const toT = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
+  // 查询范围：所有主题（含已完成/已取消，记录永久保留），按创建时间倒序
+  let plans = stockPlans.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  plans = plans.filter(p => {
+    if (fromT && (p.createdAt || 0) < fromT) return false;
+    if (toT !== Infinity && (p.createdAt || 0) > toT) return false;
+    const state = spRecTopicState(p);
+    if (st === 'active' && state !== 'active') return false;
+    if (st === 'done' && state !== 'done') return false;
+    if (st === 'cancel' && state !== 'cancel') return false;
+    if (txt) {
+      let hay = (p.title || '') + ' ' + (p.productCode || '') + ' ' + (p.materialCode || '');
+      if (p.productCode) {
+        const prod = BOM.products.find(x => x.code === p.productCode);
+        if (prod) hay += ' ' + (prod.spec || '') + ' ' + (prod.name || '');
+        hay += ' ' + (internalModels[p.productCode] || '') + ' ' + (businessTraits[p.productCode] || '');
+      }
+      if (p.materialCode) {
+        const m = BOM.materials[p.materialCode];
+        if (m) hay += ' ' + (m.spec || '') + ' ' + (m.name || '');
+      }
+      hay += ' ' + Object.entries(p.items).map(([c, it]) => {
+        const mm = BOM.materials[c];
+        return c + ' ' + (mm ? (mm.name || '') + ' ' + (mm.spec || '') : '') + ' ' + (it.note || '');
+      }).join(' ');
+      if (!hay.toLowerCase().includes(txt)) return false;
+    }
+    return true;
+  });
+  const summary = document.getElementById('spRecSummary');
+  if (summary) {
+    const nActive = plans.filter(p => spRecTopicState(p) === 'active').length;
+    const nDone = plans.filter(p => spRecTopicState(p) === 'done').length;
+    const nCancel = plans.filter(p => spRecTopicState(p) === 'cancel').length;
+    summary.innerHTML = '共 <b>' + plans.length + '</b> 条记录　·　进行中 ' + nActive + '　·　已完成 ' + nDone + '　·　已取消 ' + nCancel;
+  }
+  if (plans.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:12px;">未找到符合条件的备料记录</div>';
+    return;
+  }
+  let h = '';
+  plans.forEach(p => {
+    const state = spRecTopicState(p);
+    const allEntries = Object.entries(p.items || {});
+    const doneN = allEntries.filter(([, it]) => it.status === '完成').length;
+    const activeN = allEntries.filter(([, it]) => it.status === '执行' || it.status === '延期').length;
+    const keyN = allEntries.filter(([c]) => keyMaterials.has(c)).length;
+    const badge = state === 'done'
+      ? '<span style="background:#dcfce7;color:#166534;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✓ 已完成</span>'
+      : state === 'active'
+        ? '<span style="background:#fef3c7;color:#b45309;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">⏳ 进行中 ' + activeN + '项</span>'
+        : '<span style="background:#f1f5f9;color:#64748b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✕ 已取消</span>';
+    const endT = spRecEndTime(p);
+    h += '<div style="border:1px solid var(--border-light);border-radius:8px;margin-bottom:6px;background:#fff;overflow:hidden;">';
+    h += '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;" onclick="spRecToggle(\'' + p.id + '\')">';
+    h += '<span id="spRecArrow-' + p.id + '" style="font-size:10px;color:var(--text-muted);transition:.2s;">▶</span>';
+    h += '<span style="font-size:10px;color:var(--text-muted);background:#f1f5f9;padding:2px 6px;border-radius:6px;white-space:nowrap;">' + (p.kind === 'product' ? '成品' : '单料') + '</span>';
+    h += '<span style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;">' + escapeHtml(spTopicSubject(p)) + '</span>';
+    h += badge;
+    h += '<span style="margin-left:auto;font-size:10px;color:var(--text-muted);white-space:nowrap;flex-shrink:0;">' + fmtDate(p.createdAt) + (state !== 'active' && endT ? ' → ' + fmtDate(endT) : '') + '</span>';
+    h += '<button class="btn btn-xs btn-primary" style="flex-shrink:0;" onclick="event.stopPropagation();spCloseRecords();spGoPlan(\'' + p.id + '\')" title="跳转到备料管理并展开该主题查看明细">查看</button>';
+    h += '</div>';
+    h += '<div id="spRecDetail-' + p.id + '" style="display:none;padding:6px 10px 8px 24px;border-top:1px dashed var(--border-light);">';
+    allEntries.forEach(([code, it]) => {
+      const m = BOM.materials[code];
+      const stCls = it.status === '完成' ? '#166534' : (it.status === '延期' ? '#b45309' : (it.status === '取消' ? '#64748b' : '#1d4ed8'));
+      h += '<div style="display:flex;gap:8px;align-items:center;font-size:11px;padding:2px 0;">';
+      h += '<span style="font-family:monospace;font-weight:600;width:110px;flex-shrink:0;">' + escapeHtml(code) + (keyMaterials.has(code) ? ' <span style="color:#dc2626;" title="关键物料">★</span>' : '') + '</span>';
+      h += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml((m ? (m.name || '') + ' ' + (m.spec || '') : '')) + '</span>';
+      h += '<span style="color:' + stCls + ';font-weight:700;white-space:nowrap;">' + (it.status === '完成' ? '✓完成' : it.status === '延期' ? '⏳延期' : it.status === '取消' ? '✕取消' : '▶执行') + '</span>';
+      h += '</div>';
+    });
+    h += '</div>';
+    h += '</div>';
+  });
+  list.innerHTML = h;
 }
 
 function goStockEntry() {
