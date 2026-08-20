@@ -1039,8 +1039,62 @@ function runOnlineLoader() {
   pwEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') unlock(); });
 }
 
+function spTopicNewestT(p) {
+  // 主题最新变更时间：items 最大 updatedAt，无则用 createdAt
+  let t = (p && p.createdAt) || 0;
+  if (p && p.items) Object.values(p.items).forEach(it => { if (it && it.updatedAt) t = Math.max(t, it.updatedAt); });
+  return t;
+}
+function spGetDeletedIds() {
+  try {
+    const v = localStorage.getItem('bom_sp_deleted');
+    if (v) { const a = JSON.parse(v); if (Array.isArray(a)) return new Set(a); }
+  } catch (e) {}
+  return new Set();
+}
+function spMarkDeleted(id) {
+  try {
+    const s = spGetDeletedIds();
+    s.add(id);
+    localStorage.setItem('bom_sp_deleted', JSON.stringify([...s]));
+  } catch (e) {}
+}
 function loadFromStorage() {
-  if (window.__ONLINE__) { applyOverrides(); return; }
+  if (window.__ONLINE__) {
+    applyOverrides(); // data.enc 推送数据为基础
+    // 在线版也持久化备料数据：合并推送数据与本地增量，刷新后保留用户在网页版上的操作
+    try {
+      const sp = localStorage.getItem('bom_stock_plans');
+      const del = spGetDeletedIds();
+      const filterDel = arr => arr.filter(p => p && p.id && !del.has(p.id));
+      if (sp !== null) {
+        const v = JSON.parse(sp);
+        if (Array.isArray(v)) {
+          if (v.length === 0) {
+            // 本地保存过且已清空（用户删光/重置）→ 以本地为准
+            stockPlans = filterDel(stockPlans);
+          } else {
+            const localById = {};
+            v.forEach(p => { if (p && p.id) localById[p.id] = p; });
+            const kept = [];
+            // 推送数据中：本地没有 且 未被删除的保留
+            stockPlans.forEach(p => { if (p && p.id && !localById[p.id] && !del.has(p.id)) kept.push(p); });
+            // 本地数据：同 id 取更新时间较新者，防止旧缓存覆盖新推送
+            v.forEach(p => {
+              if (!p || !p.id || del.has(p.id)) return;
+              const base = (stockPlans || []).find(x => x && x.id === p.id);
+              if (base && spTopicNewestT(base) > spTopicNewestT(p)) kept.push(base);
+              else kept.push(p);
+            });
+            stockPlans = kept;
+          }
+        }
+      } else if (del.size) {
+        stockPlans = filterDel(stockPlans);
+      }
+    } catch (e) { console.error('online load sp error', e); }
+    return;
+  }
   try {
     const s = localStorage.getItem('bom_inventory');
     if (s) inventory = JSON.parse(s);
@@ -1067,7 +1121,7 @@ function loadFromStorage() {
   } catch(e) { console.error('load error', e); }
 }
 function saveToStorage() {
-  if (window.__ONLINE__) return; // 在线版不持久化，保证每次都是最新推送
+  // 在线版也持久化到本地：保证刷新后保留用户在网页版上的备料操作（标记完成/延期/删除等）
   try {
     localStorage.setItem('bom_inventory', JSON.stringify(inventory));
     localStorage.setItem('bom_keymaterials', JSON.stringify([...keyMaterials]));
@@ -1370,6 +1424,7 @@ function hardReset() {
   localStorage.removeItem('bom_stock_plans');
   localStorage.removeItem('bom_lead_time_overrides');
   localStorage.removeItem(SP_EXPANDED_KEY);
+  localStorage.removeItem('bom_sp_deleted');
   // Reset state
   inventory = {};
   keyMaterials = new Set();
@@ -3136,6 +3191,7 @@ function spDeletePlan(planId) {
   if (!confirm('确定删除该备料主题？删除后其记录将无法在「记录查询」中找回。')) return;
   stockPlans = stockPlans.filter(x => x.id !== planId);
   expandedSpTopics.delete(planId);
+  spMarkDeleted(planId);
   spSaveExpanded();
   saveToStorage();
   renderStockPlanTab();
