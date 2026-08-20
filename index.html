@@ -518,7 +518,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;">
         <label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="radio" name="spMode" value="product" checked onchange="spToggleMode()" style="margin:0;">按成品</label>
         <label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="radio" name="spMode" value="material" onchange="spToggleMode()" style="margin:0;">单独物料</label>
-        <input type="text" id="spProductCode" placeholder="成品编码，如 FPAD508X" style="width:150px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;" list="spProductList">
+        <input type="text" id="spProductCode" placeholder="成品编码或型号，如 FPAD508X" oninput="spUpdateProductInfo()" style="width:180px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;" list="spProductList">
         <datalist id="spProductList"></datalist>
         <input type="text" id="spMaterialCode" placeholder="物料编码，如 PCBA..." style="width:150px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;display:none;" list="spMaterialList">
         <datalist id="spMaterialList"></datalist>
@@ -538,6 +538,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
         <button class="btn btn-sm btn-primary" onclick="spCreatePlan()">创建备料主题</button>
         <span style="font-size:11px;color:var(--text-muted);">备料数量<b>二选一</b>：<b style="color:#9a3412;">追加备料</b>=直接采购量（如200即采购200）；<b style="color:#1e40af;">库存备料</b>=需求数量，自动按当前库存算缺口记入<b>补货</b>（需求200、库存100→补100），补货可直接改大（库存已满足也可多备）。上方「备料类型」决定<b>一键勾选/列出BOM</b>的批量填入方式，行内可逐个调整。备注"日期 型号 备料N"自动生成可改 | 备料不加入在途</span>
       </div>
+      <div id="spProductInfo" style="margin-top:6px;"></div>
       <div id="spEntryRows" style="margin-top:8px;"></div>
       <div id="spEntryResult" style="margin-top:6px;font-size:11px;"></div>
     </div>
@@ -2475,9 +2476,78 @@ function spQtyCell(it) {
 // ---- 录入区 ----
 function updateSpProductList() {
   const dl = document.getElementById('spProductList');
-  if (dl) dl.innerHTML = BOM.products.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
+  if (dl) dl.innerHTML = BOM.products.map(p => {
+    const parts = [p.code];
+    if (p.spec) parts.push(p.spec);
+    if (p.name) parts.push(p.name);
+    const im = internalModels[p.code];
+    if (im) parts.push(im);
+    return `<option value="${p.code}">${escapeHtml(parts.join(' '))}</option>`;
+  }).join('');
   const ml = document.getElementById('spMaterialList');
-  if (ml) ml.innerHTML = Object.entries(BOM.materials).slice(0, 500).map(([code, m]) => `<option value="${code}">${code} - ${m.name}</option>`).join('');
+  if (ml) ml.innerHTML = Object.entries(BOM.materials).slice(0, 500).map(([code, m]) => {
+    const parts = [code];
+    if (m.spec) parts.push(m.spec);
+    if (m.name) parts.push(m.name);
+    return `<option value="${code}">${escapeHtml(parts.join(' '))}</option>`;
+  }).join('');
+}
+
+// 解析用户输入（编码/名称/型号/内部型号）→ 成品对象
+function spResolveProduct(input) {
+  if (!input) return null;
+  const v = input.trim().toUpperCase();
+  // 1. 精确匹配编码
+  let p = BOM.products.find(p => (p.code || '').toUpperCase() === v);
+  if (p) return p;
+  // 2. 精确匹配名称
+  p = BOM.products.find(p => (p.name || '').toUpperCase() === v);
+  if (p) return p;
+  // 3. 精确匹配规格型号
+  p = BOM.products.find(p => (p.spec || '').toUpperCase() === v);
+  if (p) return p;
+  // 4. 精确匹配内部型号
+  p = BOM.products.find(p => (internalModels[p.code] || '').toUpperCase() === v);
+  if (p) return p;
+  // 5. 模糊匹配：名称/型号/内部型号包含输入
+  p = BOM.products.find(p => {
+    const name = (p.name || '').toUpperCase();
+    const spec = (p.spec || '').toUpperCase();
+    const im = (internalModels[p.code] || '').toUpperCase();
+    return name.includes(v) || spec.includes(v) || im.includes(v);
+  });
+  return p || null;
+}
+
+// 获取解析后的成品编码（供 spLoadBOM/spCreatePlan/spSyncNote 统一使用）
+function spGetProductCode() {
+  if (spEntryMode !== 'product') return '';
+  const raw = document.getElementById('spProductCode').value.trim();
+  if (!raw) return '';
+  const p = spResolveProduct(raw);
+  return p ? p.code : raw;
+}
+
+// 录入区实时显示成品信息（编码|名称|规格型号|内部型号|商务属性），便于识别
+function spUpdateProductInfo() {
+  const info = document.getElementById('spProductInfo');
+  if (!info) return;
+  if (spEntryMode !== 'product') { info.innerHTML = ''; return; }
+  const raw = document.getElementById('spProductCode').value.trim();
+  if (!raw) { info.innerHTML = ''; return; }
+  const p = spResolveProduct(raw);
+  if (!p) {
+    info.innerHTML = '<span style="font-size:11px;color:var(--danger);">⚠️ 未匹配到成品，可输入编码、名称、型号或内部型号</span>';
+    return;
+  }
+  const im = internalModels[p.code] || '';
+  const bt = businessTraits[p.code] || '';
+  const parts = ['<strong style="font-family:monospace;">' + escapeHtml(p.code) + '</strong>'];
+  if (p.name) parts.push('<span style="color:#64748b;">名称:</span> ' + escapeHtml(p.name));
+  if (p.spec) parts.push('<span style="color:#075985;">型号:</span> <strong>' + escapeHtml(p.spec) + '</strong>');
+  if (im) parts.push('<span style="color:#6b7280;">内部型号:</span> ' + escapeHtml(im));
+  if (bt) parts.push('<span style="color:#6b7280;">商务属性:</span> ' + escapeHtml(bt));
+  info.innerHTML = '<span style="font-size:11px;color:#075985;background:#e0f2fe;padding:4px 8px;border-radius:5px;">📋 ' + parts.join(' | ') + '</span>';
 }
 
 function spToggleMode() {
@@ -2487,6 +2557,7 @@ function spToggleMode() {
   document.getElementById('spQuickKeys').style.display = spEntryMode === 'material' ? '' : 'none';
   spEntryRows = [];
   spNoteTouched = {};
+  spUpdateProductInfo();
   spRenderEntryRows();
 }
 
@@ -2557,9 +2628,11 @@ function spLoadBOM() {
   if (!result) return;
   if (spEntryMode === 'product') {
     const pc = document.getElementById('spProductCode').value.trim();
-    if (!pc) { showToast('请输入成品编码'); return; }
-    const product = BOM.products.find(p => p.code === pc);
-    if (!product) { result.innerHTML = '<span style="color:var(--danger);">未找到该成品: ' + escapeHtml(pc) + '</span>'; return; }
+    if (!pc) { showToast('请输入成品编码或型号'); return; }
+    const product = spResolveProduct(pc);
+    if (!product) { result.innerHTML = '<span style="color:var(--danger);">未找到该成品: ' + escapeHtml(pc) + '（可输入编码、名称、型号或内部型号）</span>'; return; }
+    const subject = product.code;
+    spUpdateProductInfo();
     const items = (product.items || []).filter(it => {
       const lvl = String(it.l || '');
       return /^1(\.\d+)?$/.test(lvl) && it.c && it.a !== '虚拟';
@@ -2568,7 +2641,7 @@ function spLoadBOM() {
     spEntryRows = items.map(it => {
       const m = BOM.materials[it.c] || {};
       const st = getStock(it.c);
-      return spRowInit(it.c, m, st, getTransit(it.c), qty, bt, pc);
+      return spRowInit(it.c, m, st, getTransit(it.c), qty, bt, subject);
     });
     result.innerHTML = `<span style="color:var(--success);">✓ 已列出 ${items.length} 个第一层级物料（排除虚拟），按「${bt === 'append' ? '追加备料' : '库存备料'}」批量填入 ${qty}，勾选后可直接创建主题，行内可逐个修改</span>`;
   } else {
@@ -2674,7 +2747,7 @@ function spAppendChange(i, v) {
 // 备注自动生成：按当前类型的有效数量（追加=采购量；库存=需求量）
 function spSyncNote(r) {
   if (!r || spNoteTouched[r.code]) return;
-  const subject = spEntryMode === 'product' ? document.getElementById('spProductCode').value.trim() : r.code;
+  const subject = spGetProductCode() || r.code;
   const tot = r.spType === 'append' ? (r.appendQty || 0) : (r.qty || 0);
   r.note = spAutoNote(subject, tot);
 }
@@ -2690,8 +2763,8 @@ function spCreatePlan() {
   // 追加备料=采购量>0；库存备料=需求量>0
   const checked = spEntryRows.filter(r => r.checked && (r.spType === 'append' ? (r.appendQty || 0) > 0 : (r.qty || 0) > 0));
   if (checked.length === 0) { showToast('请至少勾选一个物料并填写备料数量（追加备料 或 库存备料）'); return; }
-  const subject = spEntryMode === 'product' ? document.getElementById('spProductCode').value.trim() : checked[0].code;
-  if (!subject) { showToast('请先填写编码并列出BOM'); return; }
+  const subject = spGetProductCode() || checked[0].code;
+  if (!subject) { showToast('请先填写成品编码或型号并列出BOM'); return; }
   // 默认标题：编码 + 规格型号
   let spec = '';
   if (spEntryMode === 'product') {
@@ -2720,7 +2793,7 @@ function spConfirmCreatePlan() {
   if (!title) { showToast('主题标识不能为空'); return; }
   const checked = spEntryRows.filter(r => r.checked && (r.spType === 'append' ? (r.appendQty || 0) > 0 : (r.qty || 0) > 0));
   if (checked.length === 0) { spCloseTopicModal(); return; }
-  const subject = spEntryMode === 'product' ? document.getElementById('spProductCode').value.trim() : checked[0].code;
+  const subject = spGetProductCode() || checked[0].code;
   const items = {};
   checked.forEach(r => {
     const isAppend = r.spType === 'append';
