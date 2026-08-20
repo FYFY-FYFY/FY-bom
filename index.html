@@ -106,6 +106,17 @@ body {
   --col-prod-after: 90px; /* 在途后可产 */
   --col-shortage: 55px;   /* 缺料 */
   --col-status: 85px;     /* 状态 */
+  /* 备料录入行(grid 7列) 可拖拽列宽 */
+  --spg-stock: 46px;      /* 库存 */
+  --spg-transit: 46px;    /* 在途 */
+  --spg-type: 84px;       /* 备料类型 */
+  --spg-qty: 118px;       /* 备料数量 */
+  /* 备料管理展开行(grid 6列) 可拖拽列宽 */
+  --spt-qty: 70px;        /* 备料量 */
+  --spt-status: 60px;     /* 状态 */
+  --spt-eta: 60px;        /* 预计到货 */
+  --spt-transit: 90px;    /* 在途变化 */
+  --spt-note: 130px;      /* 备注 */
 }
 
 /* Product column header */
@@ -536,7 +547,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
         </div>
         <button class="btn btn-sm btn-primary" onclick="spLoadBOM()">列出第一层BOM</button>
         <button class="btn btn-sm btn-primary" onclick="spCreatePlan()">创建备料主题</button>
-        <span style="font-size:11px;color:var(--text-muted);">备料数量<b>二选一</b>：<b style="color:#9a3412;">追加备料</b>=直接采购量（如200即采购200）；<b style="color:#1e40af;">库存备料</b>=需求数量，自动按当前库存算缺口记入<b>补货</b>（需求200、库存100→补100），补货可直接改大（库存已满足也可多备）。上方「备料类型」决定<b>一键勾选/列出BOM</b>的批量填入方式，行内可逐个调整。备注"日期 型号 备料N"自动生成可改 | 备料不加入在途</span>
+        <span style="font-size:11px;color:var(--text-muted);">备料数量<b>二选一</b>：<b style="color:#9a3412;">追加备料</b>=直接采购量（如200即采购200）；<b style="color:#1e40af;">库存备料</b>=需求数量，自动按 <b>库存+在途</b> 算缺口记入<b>补货</b>（需求200、库存100、在途100→缺口0已满足，不用再备；需求200、库存100、在途0→补100），补货可直接改大（已满足也可多备）。上方「备料类型」决定<b>一键勾选/列出BOM</b>的批量填入方式，行内可逐个调整。备注"日期 型号 备料N"自动生成可改 | 备料不加入在途</span>
       </div>
       <div id="spProductInfo" style="margin-top:6px;"></div>
       <div id="spEntryRows" style="margin-top:8px;"></div>
@@ -579,9 +590,18 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
       <select id="spFilterKind" onchange="renderStockPlanTab()" style="padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
         <option value="">全部类型</option><option value="product">成品备料</option><option value="material">单独物料备料</option>
       </select>
-      <input type="text" id="spFilterText" placeholder="搜索主题/物料编码/备注" oninput="renderStockPlanTab()" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
+      <input type="text" id="spFilterText" placeholder="搜索主题/物料编码/型号/内部型号/备注" oninput="renderStockPlanTab()" style="flex:1;min-width:160px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;">
       <button class="btn btn-sm btn-primary" onclick="goStockEntry()">＋ 新建备料</button>
     </div>
+
+    <!-- 按物料查看：一个物料出现在多个备料计划时，统计并展开各计划里的备料信息 -->
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:10px;background:#f8fafc;padding:8px 10px;border-radius:8px;">
+      <span style="font-weight:600;color:#0f172a;">🔍 按物料查看:</span>
+      <input type="text" id="spMatViewInput" placeholder="输入物料编码/名称/规格型号，统计该物料在所有备料计划中的备料信息" list="spMaterialList" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:6px;font-size:12px;" onkeydown="if(event.key==='Enter')spMatViewSearch()">
+      <button class="btn btn-sm btn-primary" onclick="spMatViewSearch()">查看</button>
+      <button class="btn btn-sm" onclick="spMatViewClear()">清空</button>
+    </div>
+    <div id="spMatViewResult"></div>
 
     <!-- 主题卡片列表 -->
     <div id="spTopicList"></div>
@@ -778,6 +798,27 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 </div>
 
 
+<!-- 关键物料来料确认弹窗：确认实际来料数量后标记完成；延期可修改预期到货时间 -->
+<div class="modal-overlay" id="spArriveModal">
+  <div class="modal" style="max-width:460px;">
+    <h3>📦 关键物料来料确认</h3>
+    <div id="spArriveInfo" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+    <label style="font-size:13px;">实际来料数量
+      <input type="number" id="spArriveQty" min="0" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;margin-top:4px;">
+    </label>
+    <label style="font-size:13px;display:block;margin-top:10px;">预期到货日期 <span style="color:var(--text-light);font-size:11px;">（改了日期=延期）</span>
+      <input type="date" id="spArriveDate" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;margin-top:4px;">
+    </label>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">默认来料数量=当前备料量。不改日期点「确认来料」即标记<b>完成</b>；改日期后点「延期」更新预期到货并标记<b>延期</b>。</p>
+    <div class="modal-buttons">
+      <button class="btn" onclick="spCloseArriveModal()" style="background:#f1f5f9;">取消</button>
+      <button class="btn" onclick="spArriveDelay()" style="background:#fef3c7;color:#b45309;">⏳ 延期</button>
+      <button class="btn btn-primary" onclick="spArriveComplete()">✓ 确认来料（完成）</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- Deploy / 在线发布设置 -->
 <div class="modal-overlay" id="deployModal">
   <div class="modal" style="max-width:480px;">
@@ -865,6 +906,7 @@ function applyOnlineVisibility() {
 function initApp() {
   computeMaterialMeta();
   initColResizers();
+  initSpColResizers();
   initTabs();
   document.getElementById('globalSearch').addEventListener('input', function() {
     const t = this.value.trim();
@@ -1332,6 +1374,54 @@ function applyColWidths() {
   const root = document.documentElement;
   Object.entries(colWidths).forEach(([k, v]) => root.style.setProperty('--col-' + k, v + 'px'));
 }
+// === 备料表列宽拖拽调整（录入行 spg / 管理展开行 spt）===
+const SPG_DEFAULTS = { stock: 46, transit: 46, type: 84, qty: 118 };
+const SPT_DEFAULTS = { qty: 70, status: 60, eta: 60, transit: 90, note: 130 };
+const SPG_MIN = 40;
+let spgWidths = {}, sptWidths = {};
+let spColResizeState = null;
+
+function initSpColResizers() {
+  try { spgWidths = Object.assign({}, SPG_DEFAULTS, JSON.parse(localStorage.getItem('bom_spg_widths') || '{}')); }
+  catch(e) { spgWidths = Object.assign({}, SPG_DEFAULTS); }
+  try { sptWidths = Object.assign({}, SPT_DEFAULTS, JSON.parse(localStorage.getItem('bom_spt_widths') || '{}')); }
+  catch(e) { sptWidths = Object.assign({}, SPT_DEFAULTS); }
+  applySpColWidths();
+}
+function applySpColWidths() {
+  const root = document.documentElement;
+  Object.entries(spgWidths).forEach(([k, v]) => root.style.setProperty('--spg-' + k, v + 'px'));
+  Object.entries(sptWidths).forEach(([k, v]) => root.style.setProperty('--spt-' + k, v + 'px'));
+}
+function startSpColResize(e, group, col) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const defs = group === 'g' ? SPG_DEFAULTS : SPT_DEFAULTS;
+  const widths = group === 'g' ? spgWidths : sptWidths;
+  spColResizeState = { group, col, startX: e.clientX, startW: widths[col] || defs[col] || 60 };
+  document.body.classList.add('resizing-cols');
+  document.addEventListener('mousemove', onSpColResizeMove);
+  document.addEventListener('mouseup', onSpColResizeEnd);
+}
+function onSpColResizeMove(e) {
+  if (!spColResizeState) return;
+  const st = spColResizeState;
+  const w = Math.max(SPG_MIN, Math.round(st.startW + (e.clientX - st.startX)));
+  const widths = st.group === 'g' ? spgWidths : sptWidths;
+  widths[st.col] = w;
+  document.documentElement.style.setProperty((st.group === 'g' ? '--spg-' : '--spt-') + st.col, w + 'px');
+}
+function onSpColResizeEnd() {
+  if (!spColResizeState) return;
+  const st = spColResizeState;
+  document.removeEventListener('mousemove', onSpColResizeMove);
+  document.removeEventListener('mouseup', onSpColResizeEnd);
+  document.body.classList.remove('resizing-cols');
+  try { localStorage.setItem(st.group === 'g' ? 'bom_spg_widths' : 'bom_spt_widths', JSON.stringify(st.group === 'g' ? spgWidths : sptWidths)); } catch(err) {}
+  spColResizeState = null;
+}
+
 function startColResize(e, col) {
   if (e.button !== 0) return;
   e.preventDefault();
@@ -2416,8 +2506,10 @@ function spAutoNote(subject, qty) {
   return ds + ' ' + subject + ' 备料' + (qty || '');
 }
 
-// 预计到货 = 备料时间 + 货期
+// 预计到货 = 备料时间 + 货期；若该物料手动改过预期到货时间(延期)则用 etaOverride
 function spPlanEta(plan, code) {
+  const it = plan.items && plan.items[code];
+  if (it && it.etaOverride) return it.etaOverride;
   const lt = getLeadTime(code);
   if (!lt) return null;
   return plan.createdAt + lt * 86400000;
@@ -2467,7 +2559,7 @@ function spQtyCell(it) {
     const ap = it.appendQty || 0;
     const ex = it.extra || 0;
     let s = `<span style="color:#1d4ed8;font-weight:700;" title="库存备料=需求数量">库${it.qty || 0}</span>`;
-    if (ap > 0) s += `<br><span style="font-size:9px;color:#b45309;" title="${ex > 0 ? '补货量，其中' + ex + '为超出缺口的额外多备' : '按库存自动算的补货缺口'}">补${ap}</span>`;
+    if (ap > 0) s += `<br><span style="font-size:9px;color:#b45309;" title="${ex > 0 ? '补货量，其中' + ex + '为超出缺口的额外多备' : '按库存+在途自动算的补货缺口'}">补${ap}</span>`;
     return s;
   }
   return `<span style="color:#b45309;font-weight:700;" title="追加备料=直接采购量">追${it.appendQty || 0}</span><br><span style="color:#1d4ed8;" title="库存备料=需求数量">库${it.qty || 0}</span>`;
@@ -2576,7 +2668,7 @@ function spRowInit(code, m, st, transit, qty, bt, subject) {
   if (bt === 'append') {
     row.qty = 0; row.lastQty = 0; row.appendQty = qty;
   } else {
-    row.qty = qty; row.lastQty = qty; row.appendQty = Math.max(qty - st, 0);
+    row.qty = qty; row.lastQty = qty; row.appendQty = Math.max(qty - st - (transit || 0), 0);
   }
   row.note = spAutoNote(subject, qty);
   row.checked = true;
@@ -2638,12 +2730,19 @@ function spLoadBOM() {
       return /^1(\.\d+)?$/.test(lvl) && it.c && it.a !== '虚拟';
     });
     if (items.length === 0) { result.innerHTML = '<span style="color:var(--danger);">该成品没有第一层级BOM物料</span>'; return; }
+    // 同一层级多个物料=替代组：默认只采购标准料（每组第一个），替代料列出但默认不勾选，可手动勾选
+    const seenLv = {};
     spEntryRows = items.map(it => {
       const m = BOM.materials[it.c] || {};
       const st = getStock(it.c);
-      return spRowInit(it.c, m, st, getTransit(it.c), qty, bt, subject);
+      const row = spRowInit(it.c, m, st, getTransit(it.c), qty, bt, subject);
+      const lv = String(it.l || '');
+      if (seenLv[lv]) { row.checked = false; row.alt = true; } // 替代料默认不采购
+      else seenLv[lv] = true;
+      return row;
     });
-    result.innerHTML = `<span style="color:var(--success);">✓ 已列出 ${items.length} 个第一层级物料（排除虚拟），按「${bt === 'append' ? '追加备料' : '库存备料'}」批量填入 ${qty}，勾选后可直接创建主题，行内可逐个修改</span>`;
+    const altN = spEntryRows.filter(r => r.alt).length;
+    result.innerHTML = `<span style="color:var(--success);">✓ 已列出 ${items.length} 个第一层级物料（排除虚拟），按「${bt === 'append' ? '追加备料' : '库存备料'}」批量填入 ${qty}${altN > 0 ? `，其中 <b style="color:#b45309;">${altN} 个为替代料（默认不勾选，只采购标准料，可手动勾选）</b>` : ''}，勾选后可直接创建主题，行内可逐个修改</span>`;
   } else {
     const mc = document.getElementById('spMaterialCode').value.trim();
     if (!mc) { showToast('请输入物料编码'); return; }
@@ -2660,20 +2759,25 @@ function spRenderEntryRows() {
   if (!c) return;
   if (spEntryRows.length === 0) { c.innerHTML = ''; return; }
   let h = '<div style="border:1px solid #bae6fd;border-radius:8px;overflow:hidden;">';
-  h += '<div style="display:grid;grid-template-columns:24px 1fr 46px 46px 84px 118px 1.3fr;gap:6px;padding:6px 10px;background:#e0f2fe;font-weight:600;font-size:11px;color:#075985;align-items:center;">';
-  h += '<span>✓</span><span>物料</span><span>库存</span><span>在途</span><span>备料类型</span><span title="追加=采购量(橙)；库存=需求(蓝)+补货(橙,自动算缺口可改)">备料数量</span><span>备注（自动生成，可改）</span></div>';
+  h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:6px 10px;background:#e0f2fe;font-weight:600;font-size:11px;color:#075985;align-items:center;">';
+  h += '<span>✓</span><span>物料</span>';
+  h += '<span style="position:relative;">库存<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'stock\')" onclick="event.stopPropagation()"></span></span>';
+  h += '<span style="position:relative;">在途<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'transit\')" onclick="event.stopPropagation()"></span></span>';
+  h += '<span style="position:relative;">备料类型<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'type\')" onclick="event.stopPropagation()"></span></span>';
+  h += '<span style="position:relative;" title="追加=采购量(橙)；库存=需求(蓝)+补货(橙,缺口=需求-库存-在途,自动算可改)">备料数量<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'qty\')" onclick="event.stopPropagation()"></span></span>';
+  h += '<span>备注（自动生成，可改）</span></div>';
   spEntryRows.forEach((r, i) => {
     const isAppend = r.spType === 'append';
-    const gap = Math.max((parseInt(r.qty) || 0) - (r.stock || 0), 0);
-    h += '<div style="display:grid;grid-template-columns:24px 1fr 46px 46px 84px 118px 1.3fr;gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:#fff;">';
+    const gap = Math.max((parseInt(r.qty) || 0) - (r.stock || 0) - (r.transit || 0), 0); // 缺口=需求-库存-在途
+    h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:' + (r.alt ? '#fffbeb' : '#fff') + ';">';
     h += '<input type="checkbox" ' + (r.checked ? 'checked' : '') + ' onchange="spEntryToggle(' + i + ',this.checked)" style="margin:0;">';
-    h += '<span title="' + escapeHtml(r.code + ' ' + r.name + ' ' + (r.spec || '')) + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong style="font-family:monospace;">' + escapeHtml(r.code) + '</strong>' + (r.name ? ' ' + escapeHtml(r.name) : '') + '</span>';
+    h += '<span title="' + escapeHtml(r.code + ' ' + r.name + ' ' + (r.spec || '')) + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong style="font-family:monospace;">' + escapeHtml(r.code) + '</strong>' + (r.name ? ' ' + escapeHtml(r.name) : '') + (r.spec ? ' <span style="color:#075985;font-size:10px;">' + escapeHtml(r.spec) + '</span>' : '') + (r.alt ? ' <span style="background:#fef3c7;color:#b45309;font-size:9px;padding:0 4px;border-radius:4px;">替代</span>' : '') + '</span>';
     h += '<span style="color:' + (r.stock > 0 ? 'var(--success)' : 'var(--danger)') + ';">' + r.stock + '</span>';
     h += '<span style="color:' + (r.transit > 0 ? 'var(--warning)' : 'var(--text-muted)') + ';">' + r.transit + '</span>';
     // 备料类型二选一：追加备料(直接采购量) / 库存备料(需求数量，自动算缺口补货)
     h += '<span style="display:flex;gap:2px;">';
     h += '<span onclick="spSetType(' + i + ',\'append\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (isAppend ? 'background:#fdba74;color:#7c2d12;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="追加备料=直接采购数量（如200即采购200）">追加</span>';
-    h += '<span onclick="spSetType(' + i + ',\'stock\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (!isAppend ? 'background:#93c5fd;color:#1e3a8a;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="库存备料=需求数量，自动按库存算缺口补货（如需求200、库存100→补100）；补货可改大（库存已满足也可多备）">库存</span>';
+    h += '<span onclick="spSetType(' + i + ',\'stock\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (!isAppend ? 'background:#93c5fd;color:#1e3a8a;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="库存备料=需求数量，自动按 库存+在途 算缺口补货（如需求200、库存100、在途100→缺口0已满足）；补货可改大（已满足也可多备）">库存</span>';
     h += '</span>';
     // 数量输入：追加=采购量(橙单框)；库存=需求(蓝)+补货(橙，自动缺口可改)
     if (isAppend) {
@@ -2681,14 +2785,18 @@ function spRenderEntryRows() {
     } else {
       h += '<span style="display:flex;gap:3px;">';
       h += '<input type="number" min="0" value="' + (r.qty || 0) + '" onchange="spQtyChange(' + i + ',this.value)" title="库存备料=需求数量" style="flex:1;min-width:0;padding:3px 2px;border:1px solid #93c5fd;background:#eff6ff;border-radius:5px;font-size:11px;text-align:center;color:#1e40af;">';
-      h += '<input type="number" min="0" value="' + (r.appendQty || 0) + '" onchange="spAppendChange(' + i + ',this.value)" title="补货量=自动按缺口算（需求-库存），可直接改大（库存已满足也想多备时改这里）" style="flex:1;min-width:0;padding:3px 2px;border:1px solid #fdba74;background:#fff7ed;border-radius:5px;font-size:11px;text-align:center;color:#9a3412;">';
+      h += '<input type="number" min="0" value="' + (r.appendQty || 0) + '" onchange="spAppendChange(' + i + ',this.value)" title="补货量=自动按缺口算（需求-库存-在途），可直接改大（已满足也想多备时改这里）" style="flex:1;min-width:0;padding:3px 2px;border:1px solid #fdba74;background:#fff7ed;border-radius:5px;font-size:11px;text-align:center;color:#9a3412;">';
       h += '</span>';
     }
     h += '<input type="text" value="' + escapeHtml(r.note) + '" oninput="spEntryNoteChange(' + i + ',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-strong);border-radius:5px;font-size:11px;">';
     h += '</div>';
     if (!isAppend && gap > 0) {
-      h += '<div style="display:grid;grid-template-columns:24px 1fr 46px 46px 84px 118px 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:#b45309;background:#fff;">';
-      h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">⚠️ 库存不足，缺口 ' + gap + ' 已自动记入补货（可改大）</span><span></span>';
+      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:#b45309;background:#fff;">';
+      h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">⚠️ 需求' + (r.qty || 0) + '-库存' + (r.stock || 0) + '-在途' + (r.transit || 0) + '=缺口 ' + gap + '，已自动记入补货（可改大）</span><span></span>';
+      h += '</div>';
+    } else if (!isAppend && (r.qty || 0) > 0) {
+      h += '<div style="display:grid;grid-template-columns:24px 1fr var(--spg-stock) var(--spg-transit) var(--spg-type) var(--spg-qty) 1.3fr;gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
+      h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">✓ 库存' + (r.stock || 0) + '+在途' + (r.transit || 0) + '已满足需求' + (r.qty || 0) + '，无需补货</span><span></span>';
       h += '</div>';
     }
   });
@@ -2708,7 +2816,7 @@ function spSetType(i, t) {
     r.extra = 0; r.appendTouched = false;
   } else {
     r.qty = r.lastQty || 0; // 恢复之前的需求数量
-    r.appendQty = Math.max(r.qty - (r.stock || 0), 0);
+    r.appendQty = Math.max(r.qty - (r.stock || 0) - (r.transit || 0), 0); // 缺口=需求-库存-在途
     r.extra = 0; r.appendTouched = false;
   }
   r.spType = t;
@@ -2725,8 +2833,8 @@ function spQtyChange(i, v) {
     r.appendQty = n;
   } else {
     r.qty = n; r.lastQty = n;
-    if (!r.appendTouched) { // 补货未被手动改过 → 自动按缺口
-      r.appendQty = Math.max(n - (r.stock || 0), 0);
+    if (!r.appendTouched) { // 补货未被手动改过 → 自动按缺口（需求-库存-在途）
+      r.appendQty = Math.max(n - (r.stock || 0) - (r.transit || 0), 0);
       r.extra = 0;
     }
   }
@@ -2740,7 +2848,7 @@ function spAppendChange(i, v) {
   if (!r) return;
   r.appendQty = parseInt(v) || 0;
   r.appendTouched = true;
-  r.extra = Math.max(r.appendQty - Math.max((r.qty || 0) - (r.stock || 0), 0), 0); // 超出缺口部分=额外多备
+  r.extra = Math.max(r.appendQty - Math.max((r.qty || 0) - (r.stock || 0) - (r.transit || 0), 0), 0); // 超出缺口部分=额外多备（缺口=需求-库存-在途）
   spRenderEntryRows();
 }
 
@@ -2889,6 +2997,71 @@ function spSetItemStatus(planId, code, status) {
   updateReminderBell();
 }
 
+// ---- 关键物料来料确认：确认数量→完成；改日期→延期+更新预期到货 ----
+let spArriveCtx = null;
+function spArriveConfirm(planId, code) {
+  const p = stockPlans.find(x => x.id === planId);
+  if (!p || !p.items[code]) return;
+  const it = p.items[code];
+  spArriveCtx = { planId, code };
+  const m = BOM.materials[code] || {};
+  const mName = m ? (m.name || '') : '';
+  const mSpec = m ? (m.spec || '') : '';
+  const qtyInfo = it.spType === 'append' ? ('采购量 ' + (it.appendQty || 0)) : (it.spType === 'stock' ? ('需求 ' + (it.qty || 0) + '（补货 ' + (it.appendQty || 0) + '）') : ('备料 ' + (it.qty || 0) + ' + 补货 ' + (it.appendQty || 0)));
+  document.getElementById('spArriveInfo').innerHTML =
+    `<div style="background:#f8fafc;border-radius:8px;padding:10px;font-size:12px;line-height:1.9;">` +
+    `<div><b>物料:</b> <span style="font-family:monospace;font-weight:700;">${escapeHtml(code)}</span>${mName ? ' ' + escapeHtml(mName) : ''}${mSpec ? ' <span style="color:#075985;">' + escapeHtml(mSpec) + '</span>' : ''} <span style="color:#dc2626;">★关键</span></div>` +
+    `<div><b>主题:</b> ${escapeHtml(spTopicSubject(p))}</div>` +
+    `<div><b>当前备料:</b> ${qtyInfo}，状态 ${it.status}</div>` +
+    `<div><b>原预期到货:</b> ${spPlanEta(p, code) ? fmtDate(spPlanEta(p, code)) : '-'}</div></div>`;
+  document.getElementById('spArriveQty').value = it.appendQty || 0;
+  document.getElementById('spArriveDate').value = spPlanEta(p, code) ? fmtDate(spPlanEta(p, code)) : fmtDate(Date.now());
+  document.getElementById('spArriveModal').classList.add('active');
+}
+function spArriveComplete() {
+  if (!spArriveCtx) return;
+  const { planId, code } = spArriveCtx;
+  const p = stockPlans.find(x => x.id === planId);
+  if (!p || !p.items[code]) return;
+  const it = p.items[code];
+  const qty = parseInt(document.getElementById('spArriveQty').value) || 0;
+  it.arrivedQty = qty;
+  it.status = '完成';
+  it.updatedAt = Date.now();
+  saveToStorage();
+  renderStockPlanTab();
+  renderKeySummary();
+  renderProducts();
+  updateReminderBell();
+  spCloseArriveModal();
+  showToast('已确认来料 ' + qty + '，标记完成');
+}
+function spArriveDelay() {
+  if (!spArriveCtx) return;
+  const { planId, code } = spArriveCtx;
+  const p = stockPlans.find(x => x.id === planId);
+  if (!p || !p.items[code]) return;
+  const it = p.items[code];
+  const ds = document.getElementById('spArriveDate').value;
+  if (!ds) { showToast('请选择新的预期到货日期'); return; }
+  const qty = parseInt(document.getElementById('spArriveQty').value) || 0;
+  it.arrivedQty = qty;
+  it.etaOverride = new Date(ds + 'T00:00:00').getTime();
+  it.status = '延期';
+  it.updatedAt = Date.now();
+  saveToStorage();
+  renderStockPlanTab();
+  renderKeySummary();
+  renderProducts();
+  updateReminderBell();
+  spCloseArriveModal();
+  showToast('已延期，预期到货更新为 ' + ds);
+}
+function spCloseArriveModal() {
+  document.getElementById('spArriveModal').classList.remove('active');
+  spArriveCtx = null;
+}
+
 function spDeletePlan(planId) {
   if (!confirm('确定删除该备料主题？')) return;
   stockPlans = stockPlans.filter(x => x.id !== planId);
@@ -2908,6 +3081,69 @@ function spToggleTopicExpand(planId) {
 function goStockEntry() {
   switchTab('keymaterials');
   document.getElementById('spEntryRows').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ---- 按物料查看：一个物料在多个备料计划中的备料信息（统计+展开） ----
+function spMatViewSearch() {
+  const raw = document.getElementById('spMatViewInput').value.trim();
+  const out = document.getElementById('spMatViewResult');
+  if (!raw) { out.innerHTML = ''; return; }
+  // 解析物料：编码精确 → 名称/规格型号包含
+  const up = raw.toUpperCase();
+  let code = null;
+  if (BOM.materials[up]) code = up;
+  else {
+    const found = Object.entries(BOM.materials).find(([c, m]) => ((m.name || '') + ' ' + (m.spec || '')).toUpperCase().includes(up));
+    if (found) code = found[0];
+  }
+  if (!code) { out.innerHTML = '<span style="color:var(--danger);font-size:12px;">未找到物料: ' + escapeHtml(raw) + '</span>'; return; }
+  const m = BOM.materials[code] || {};
+  // 收集该物料所有备料计划条目
+  const entries = [];
+  stockPlans.forEach(p => {
+    const it = p.items[code];
+    if (it) entries.push({ p, it });
+  });
+  entries.sort((a, b) => (b.p.createdAt || 0) - (a.p.createdAt || 0));
+  let total = 0, exe = 0, done = 0, delay = 0, cancel = 0;
+  entries.forEach(({ p, it }) => {
+    if (it.spType === 'append') total += (it.appendQty || 0);
+    else if (it.spType === 'stock') total += (it.qty || 0) + (it.extra || 0);
+    else total += (it.qty || 0) + (it.appendQty || 0);
+    if (it.status === '执行') exe++;
+    else if (it.status === '完成') done++;
+    else if (it.status === '延期') delay++;
+    else if (it.status === '取消') cancel++;
+  });
+  const statCard = (label, val, color, bg) => `<div style="background:${bg};color:${color};border-radius:8px;padding:10px;text-align:center;"><div style="font-size:18px;font-weight:800;">${val}</div><div style="font-size:11px;">${label}</div></div>`;
+  let h = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px;">';
+  h += statCard('备料计划', entries.length, '#1d4ed8', '#dbeafe');
+  h += statCard('合计备料量', total, '#b45309', '#fef3c7');
+  h += statCard('执行中', exe, '#1d4ed8', '#dbeafe');
+  h += statCard('已完成', done, '#166534', '#dcfce7');
+  h += statCard('延期', delay, '#b45309', '#fef3c7');
+  h += '</div>';
+  h += '<div style="border:1px solid var(--border-strong);border-radius:10px;overflow:hidden;margin-bottom:14px;">';
+  h += `<div style="padding:8px 12px;background:#f8fafc;font-size:12px;font-weight:600;">📋 <span style="font-family:monospace;">${escapeHtml(code)}</span>${m.name ? ' ' + escapeHtml(m.name) : ''}${m.spec ? ' <span style="color:#075985;font-weight:400;">' + escapeHtml(m.spec) + '</span>' : ''} 全部备料计划${entries.length > 0 ? `（${entries.length}个主题）` : ''}</div>`;
+  if (entries.length === 0) {
+    h += '<div style="padding:12px;font-size:12px;color:var(--text-muted);">该物料暂无备料计划（可在「备料录入」中创建）</div>';
+  } else {
+    entries.forEach(({ p, it }) => {
+      const eta = spPlanEta(p, code);
+      h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty) var(--spt-status) var(--spt-eta);gap:6px;padding:6px 12px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;">';
+      h += `<span title="${escapeHtml(spTopicSubject(p))}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(spTopicSubject(p))} <span style="color:var(--text-muted);font-size:10px;">(${fmtDate(p.createdAt)})</span></span>`;
+      h += `<span class="num" style="text-align:center;font-size:10px;line-height:1.5;">${spQtyCell(it)}</span>`;
+      h += `<span style="text-align:center;">${it.status === '完成' ? '<span style="color:#166534;font-weight:700;">✓完成</span>' : it.status === '延期' ? '<span style="color:#b45309;font-weight:700;">⏳延期</span>' : it.status === '取消' ? '<span style="color:#64748b;">✕取消</span>' : '<span style="color:#1d4ed8;">▶执行</span>'}</span>`;
+      h += `<span style="text-align:center;font-size:11px;">${eta ? fmtDate(eta) + (it.etaOverride ? ' ⏳' : '') : '-'}</span>`;
+      h += '</div>';
+    });
+  }
+  h += '</div>';
+  out.innerHTML = h;
+}
+function spMatViewClear() {
+  document.getElementById('spMatViewInput').value = '';
+  document.getElementById('spMatViewResult').innerHTML = '';
 }
 
 function renderStockPlanTab() {
@@ -2961,7 +3197,21 @@ function renderStockPlanTab() {
       if (!Object.values(p.items).some(it => it.status === fStatus)) return false;
     }
     if (fText) {
-      const hay = (p.title || '') + ' ' + (p.productCode || '') + ' ' + (p.materialCode || '') + ' ' + Object.entries(p.items).map(([c, it]) => c + ' ' + (it.note || '')).join(' ');
+      // 搜索范围：主题标题 / 编码 / 物料名称+规格型号 / 内部型号 / 商务属性 / 备注
+      let hay = (p.title || '') + ' ' + (p.productCode || '') + ' ' + (p.materialCode || '');
+      if (p.productCode) {
+        const prod = BOM.products.find(x => x.code === p.productCode);
+        if (prod) hay += ' ' + (prod.spec || '') + ' ' + (prod.name || '');
+        hay += ' ' + (internalModels[p.productCode] || '') + ' ' + (businessTraits[p.productCode] || '');
+      }
+      if (p.materialCode) {
+        const m = BOM.materials[p.materialCode];
+        if (m) hay += ' ' + (m.spec || '') + ' ' + (m.name || '');
+      }
+      hay += ' ' + Object.entries(p.items).map(([c, it]) => {
+        const mm = BOM.materials[c];
+        return c + ' ' + (mm ? (mm.name || '') + ' ' + (mm.spec || '') : '') + ' ' + (it.note || '');
+      }).join(' ');
       if (!hay.toLowerCase().includes(fText)) return false;
     }
     if (onlyKey) {
@@ -3018,8 +3268,13 @@ function renderStockPlanTab() {
       if (onlyKey && noKeyEntry) {
         h += `<div style="font-size:11px;color:var(--text-muted);padding:8px;background:#f8fafc;border-radius:6px;margin-top:6px;">🔒 该主题无关键物料（共 ${allEntries.length} 项非关键备料），备料管理仅展示关键物料</div>`;
       } else {
-        h += '<div style="display:grid;grid-template-columns:1.6fr 70px 60px 60px 90px 130px;gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
-        h += '<span>物料' + (onlyKey ? '（仅关键）' : '') + '</span><span>备料量</span><span>状态</span><span>预计到货</span><span>在途变化</span><span>备注</span></div>';
+        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty) var(--spt-status) var(--spt-eta) var(--spt-transit) var(--spt-note);gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
+        h += '<span>物料' + (onlyKey ? '（仅关键）' : '') + '</span>';
+        h += '<span style="position:relative;">备料量<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'qty\')" onclick="event.stopPropagation()"></span></span>';
+        h += '<span style="position:relative;">状态<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'status\')" onclick="event.stopPropagation()"></span></span>';
+        h += '<span style="position:relative;">预计到货<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'eta\')" onclick="event.stopPropagation()"></span></span>';
+        h += '<span style="position:relative;">在途变化<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'transit\')" onclick="event.stopPropagation()"></span></span>';
+        h += '<span style="position:relative;">备注<span class="col-resizer" onmousedown="startSpColResize(event,\'t\',\'note\')" onclick="event.stopPropagation()"></span></span></div>';
       }
       entries.forEach(([code, it]) => {
         const eta = spPlanEta(p, code);
@@ -3027,16 +3282,19 @@ function renderStockPlanTab() {
         const mName = m ? (m.name || '') : '';
         const mSpec = m ? (m.spec || '') : '';
         const stCls = it.status === '完成' ? '#166534' : (it.status === '延期' ? '#b45309' : (it.status === '取消' ? '#64748b' : (spItemDue(p, code, it) ? '#b91c1c' : '#1d4ed8')));
-        h += '<div style="display:grid;grid-template-columns:1.6fr 70px 60px 60px 90px 130px;gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;">';
-        h += `<span title="${escapeHtml(code + ' ' + mName + ' ' + mSpec)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-family:monospace;font-weight:600;">${code}</span>${mName ? ' <span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(mName) + '</span>' : ''}</span>`;
+        h += '<div style="display:grid;grid-template-columns:1.6fr var(--spt-qty) var(--spt-status) var(--spt-eta) var(--spt-transit) var(--spt-note);gap:6px;padding:4px 6px;border-top:1px solid var(--border-light);font-size:11px;align-items:center;' + (keyMaterials.has(code) ? 'background:#fef2f2;' : '') + '>';
+        h += `<span title="${escapeHtml(code + ' ' + mName + ' ' + mSpec)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span style="font-family:monospace;font-weight:600;">${code}</span>${mName ? ' <span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(mName) + '</span>' : ''}${mSpec ? ' <span style="color:#075985;font-size:10px;">' + escapeHtml(mSpec) + '</span>' : ''}${keyMaterials.has(code) ? ' <span style="color:#dc2626;" title="关键物料">★</span>' : ''}</span>`;
         h += `<span class="num" style="font-size:10px;line-height:1.5;text-align:center;">${spQtyCell(it)}</span>`;
         h += `<span>`;
+        if (keyMaterials.has(code)) { // 关键物料：来料确认（弹窗确认数量，确认后完成；可改延期/预期到货）
+          h += `<span onclick="spArriveConfirm('${p.id}','${code}')" style="cursor:pointer;font-size:10px;padding:1px 5px;border-radius:6px;margin-right:2px;background:#fee2e2;color:#b91c1c;font-weight:700;" title="关键物料来料：确认实际来料数量后标记完成；延期可修改预期到货时间">📦来料</span>`;
+        }
         SP_STATUS.forEach(s => {
           const sel = s === it.status;
           h += `<span onclick="spSetItemStatus('${p.id}','${code}','${s}')" style="cursor:pointer;font-size:10px;padding:1px 5px;border-radius:6px;margin-right:2px;${sel ? 'background:' + stCls + ';color:#fff;font-weight:700;' : 'background:#f1f5f9;color:#64748b;'}" title="点击切换为${s}">${s === '完成' ? '✓' : s === '延期' ? '⏳' : s === '取消' ? '✕' : '▶'}${s}</span>`;
         });
         h += '</span>';
-        h += `<span style="font-size:11px;color:${eta ? (spItemDue(p, code, it) ? 'var(--danger)' : 'var(--text-muted)') : 'var(--text-muted)'};">${eta ? fmtDate(eta) : '-'}</span>`;
+        h += `<span style="font-size:11px;color:${eta ? (spItemDue(p, code, it) ? 'var(--danger)' : 'var(--text-muted)') : 'var(--text-muted)'};">${eta ? fmtDate(eta) + (it.etaOverride ? ' ⏳' : '') : '-'}</span>`;
         h += `<span style="white-space:nowrap;">${spTransitArrow(code)}</span>`;
         h += `<span style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(it.note || '')}">${escapeHtml(it.note || '')}</span>`;
         h += '</div>';
