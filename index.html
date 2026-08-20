@@ -92,7 +92,8 @@ body {
 :root {
   --col-expand: 30px;     /* 展开图标列 */
   --col-code: 150px;      /* 物料编码 */
-  --col-desc: 220px;      /* 名称/规格 */
+  --col-name: 110px;      /* 产品名称 */
+  --col-spec: 150px;      /* 规格型号 */
   --col-internal: 75px;   /* 内部型号 */
   --col-biz: 65px;        /* 商务 */
   --col-attr: 48px;       /* 属性 */
@@ -147,7 +148,8 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 .product-internal { font-size: 11px; color: var(--purple); font-weight: 600; white-space: nowrap; }
 .product-metrics { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .product-col-code { font-family: monospace; font-weight: 700; font-size: 13px; width: var(--col-code); flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.product-col-desc { width: var(--col-desc); flex-shrink: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.product-col-name { width: var(--col-name); flex-shrink: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.product-col-spec { width: var(--col-spec); flex-shrink: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .product-col-internal { width: var(--col-internal); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .product-col-biz { width: var(--col-biz); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .product-col-attr { width: var(--col-attr); flex-shrink: 0; text-align: center; }
@@ -474,7 +476,8 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
   <div class="product-col-header">
     <span style="width:var(--col-expand);"></span>
     <span class="hcol sortable-header" onclick="sortProducts('code')" style="width:var(--col-code);"><span class="hcol-text">物料编码<span class="sh-arrow" id="sh-code"></span></span><span class="col-resizer" onmousedown="startColResize(event,'code')" onclick="event.stopPropagation()"></span></span>
-    <span class="hcol sortable-header" onclick="sortProducts('name')" style="width:var(--col-desc);"><span class="hcol-text">名称/规格<span class="sh-arrow" id="sh-name"></span></span><span class="col-resizer" onmousedown="startColResize(event,'desc')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol sortable-header" onclick="sortProducts('name')" style="width:var(--col-name);"><span class="hcol-text">产品名称<span class="sh-arrow" id="sh-name"></span></span><span class="col-resizer" onmousedown="startColResize(event,'name')" onclick="event.stopPropagation()"></span></span>
+    <span class="hcol sortable-header" onclick="sortProducts('spec')" style="width:var(--col-spec);"><span class="hcol-text">规格型号<span class="sh-arrow" id="sh-spec"></span></span><span class="col-resizer" onmousedown="startColResize(event,'spec')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol sortable-header" onclick="sortProducts('internal')" style="width:var(--col-internal);text-align:center;"><span class="hcol-text">内部型号<span class="sh-arrow" id="sh-internal"></span></span><span class="col-resizer" onmousedown="startColResize(event,'internal')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol" style="width:var(--col-biz);text-align:center;"><span class="hcol-text">商务</span><span class="col-resizer" onmousedown="startColResize(event,'biz')" onclick="event.stopPropagation()"></span></span>
     <span class="hcol sortable-header" onclick="sortProducts('attr')" style="width:var(--col-attr);text-align:center;"><span class="hcol-text">属性<span class="sh-arrow" id="sh-attr"></span></span><span class="col-resizer" onmousedown="startColResize(event,'attr')" onclick="event.stopPropagation()"></span></span>
@@ -869,8 +872,29 @@ window.addEventListener('DOMContentLoaded', function() {
   window.__SHELL_HTML__ = document.documentElement.outerHTML;
   BOM = window.BOM_DATA;
   if (!BOM) { alert('BOM数据加载失败！'); return; }
-  loadFromStorage();
-  initApp();
+  try {
+    loadFromStorage();
+    initApp();
+  } catch (err) {
+    console.error('初始化失败:', err);
+    var ov = document.getElementById('loadingOverlay');
+    if (ov) {
+      ov.innerHTML = '<div style="text-align:center;max-width:440px;padding:24px;line-height:2;">'
+        + '<div style="font-size:30px;">⚠️</div>'
+        + '<div style="font-weight:600;font-size:15px;">加载出错（不再卡死）</div>'
+        + '<div style="font-size:12px;color:#64748b;word-break:break-all;margin-top:6px;">' + String(err && err.message || err).replace(/</g, '&lt;') + '</div>'
+        + '<div style="margin-top:14px;">'
+        + '<button class="btn btn-outline" onclick="if(confirm(\'确定清空本机已导入数据(库存/备料/生产单等)并重载？此操作不可撤销！\')){localStorage.clear();location.reload()}">🧹 清空本地数据重载</button> '
+        + '<button class="btn btn-outline" onclick="location.reload()">🔄 刷新重试</button>'
+        + '</div></div>';
+    }
+  }
+  // 兜底：渲染慢或异常时，最多转 8 秒后强制结束加载，避免"一直加载"
+  setTimeout(function() {
+    if (window.__ONLINE__) return;
+    var ov = document.getElementById('loadingOverlay');
+    if (ov && ov.style.display !== 'none') ov.style.display = 'none';
+  }, 8000);
 });
 
 // 在线版：密码登录 -> 拉取解密 data.enc -> 初始化
@@ -943,9 +967,9 @@ function loadFromStorage() {
     const po = localStorage.getItem('bom_production_orders');
     if (po) productionOrders = JSON.parse(po);
     const sp = localStorage.getItem('bom_stock_plans');
-    if (sp) stockPlans = JSON.parse(sp);
+    if (sp) { const v = JSON.parse(sp); if (Array.isArray(v)) stockPlans = v; } // 防旧格式非数组导致 forEach 崩溃
     const lto = localStorage.getItem('bom_lead_time_overrides');
-    if (lto) leadTimeOverrides = JSON.parse(lto);
+    if (lto) { const v = JSON.parse(lto); if (v && typeof v === 'object' && !Array.isArray(v)) leadTimeOverrides = v; }
     // 旧版备料结构(bom_stock_plan)已废弃，直接清空
     try { localStorage.removeItem('bom_stock_plan'); } catch(e) {}
   } catch(e) { console.error('load error', e); }
@@ -1826,6 +1850,7 @@ function renderProducts() {
       switch (productSort.col) {
         case 'code': va = a.code; vb = b.code; break;
         case 'name': va = a.name; vb = b.name; break;
+        case 'spec': va = a.spec || ''; vb = b.spec || ''; break;
         case 'internal': va = internalModels[a.code] || ''; vb = internalModels[b.code] || ''; break;
         case 'stock': va = getStock(a.code); vb = getStock(b.code); break;
         case 'keyPn': va = a.calc.keyPn; vb = b.calc.keyPn; break;
@@ -1892,7 +1917,8 @@ function renderProducts() {
       <div class="product-header" onclick="toggleProduct('${escCode}')">
         <span class="expand-icon">▶</span>
         <span class="product-col-code copyable-code" title="点击复制: ${product.code}" onclick="event.stopPropagation();copyToClipboard('${escCode}')">${product.code}</span>
-        <span class="product-col-desc" title="${escapeHtml(product.name)}${product.spec ? ' - ' + escapeHtml(product.spec) : ''}" style="cursor:default;">${product.spec ? '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(product.spec) + '</span>' : '<span style="color:var(--text-muted);">' + escapeHtml(product.name) + '</span>'}</span>
+        <span class="product-col-name" title="${escapeHtml(product.name)}" style="cursor:default;">${escapeHtml(product.name)}</span>
+        <span class="product-col-spec" title="${escapeHtml(product.spec || '')}" style="cursor:default;">${escapeHtml(product.spec || '')}</span>
         <div class="product-col-internal"><input class="internal-input" value="${escapeHtml(im)}" placeholder="内部型号" onclick="event.stopPropagation()" onchange="updateInternalModel('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <div class="product-col-biz"><input class="biz-input" value="${escapeHtml(bt)}" placeholder="商务特性" onclick="event.stopPropagation()" onchange="updateBizTrait('${escCode}',this.value)" onkeydown="if(event.key==='Enter')this.blur()"></div>
         <span class="product-col-attr"><span class="attr-tag ${product.attr}">${product.attr}</span></span>
@@ -1924,7 +1950,7 @@ function sortProducts(col) {
   renderProducts();
 }
 function updateSortArrows() {
-  ['code','name','internal','attr'].forEach(c => {
+  ['code','name','spec','internal','attr'].forEach(c => {
     const el = document.getElementById('sh-'+c);
     if (!el) return;
     el.className = 'sh-arrow';
@@ -1984,7 +2010,11 @@ function renderBOMTable(product, calc) {
   const bottleneckSet = new Set();
   if (calc.keyBottleneck) bottleneckSet.add(calc.keyBottleneck);
   if (calc.keyBottleneckPa && calc.keyBottleneckPa !== calc.keyBottleneck) bottleneckSet.add(calc.keyBottleneckPa);
-  let h = '<div class="bom-tree-wrap"><table class="bom-table"><colgroup>';
+  const imInfo2 = internalModels[product.code] || '';
+  const btInfo2 = businessTraits[product.code] || '';
+  let h = '<div class="bom-tree-wrap">';
+  h += `<div style="font-size:11px;color:var(--text-muted);padding:2px 6px 6px;display:flex;gap:14px;flex-wrap:wrap;"><span><b style="color:var(--text-strong);">产品名称:</b> ${escapeHtml(product.name || '')}</span><span><b style="color:var(--text-strong);">规格型号:</b> ${escapeHtml(product.spec || '-')}</span><span><b style="color:var(--text-strong);">内部型号:</b> ${escapeHtml(imInfo2 || '-')}</span><span><b style="color:var(--text-strong);">商务特性:</b> ${escapeHtml(btInfo2 || '-')}</span></div>`;
+  h += '<table class="bom-table"><colgroup>';
   h += '<col style="width:50px;"><col style="width:60px;"><col style="width:135px;"><col style="width:80px;">';
   h += '<col style="width:170px;"><col style="width:48px;"><col style="width:50px;"><col style="width:58px;">';
   h += '<col style="width:38px;"><col style="width:68px;"><col style="width:68px;"><col style="width:100px;">';
@@ -2562,11 +2592,12 @@ function spCreatePlan() {
 }
 
 // ---- 备料管理页 ----
-function spPlanStats() {
+function spPlanStats(onlyKey) {
+  if (onlyKey === undefined) onlyKey = true;
   let exe = 0, done = 0, delay = 0, cancel = 0, due = 0;
   stockPlans.forEach(p => {
     Object.entries(p.items).forEach(([code, it]) => {
-      if (!keyMaterials.has(code)) return; // 备料管理只看关键物料
+      if (onlyKey && !keyMaterials.has(code)) return; // 勾选"只看关键物料"时仅统计关键物料
       if (it.status === '执行') { exe++; if (spItemDue(p, code, it)) due++; }
       else if (it.status === '完成') done++;
       else if (it.status === '延期') delay++;
@@ -2586,7 +2617,27 @@ function spTopicSubject(p) {
     const m = BOM.materials[p.materialCode];
     return p.materialCode + (m ? ' ' + m.name : '');
   }
-  return p.productCode || p.title || '';
+  const prod = BOM.products.find(x => x.code === p.productCode);
+  return p.productCode + (prod && prod.name ? ' ' + prod.name : '');
+}
+
+// 备料主题的产品补充信息：型号、内部型号、商务特性（仅展示，不参与逻辑）
+function spTopicMeta(p) {
+  if (p.kind === 'material' && p.materialCode) {
+    const m = BOM.materials[p.materialCode];
+    if (!m) return '';
+    return '<span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(m.spec || m.name || '') + '</span>';
+  }
+  const prod = BOM.products.find(x => x.code === p.productCode);
+  if (!prod) return '';
+  const parts = [];
+  if (prod.name) parts.push('产品:' + prod.name);
+  if (prod.spec) parts.push('型号:' + prod.spec);
+  const im = internalModels[p.productCode];
+  const bt = businessTraits[p.productCode];
+  if (im) parts.push('内部型号:' + im);
+  if (bt) parts.push('商务特性:' + bt);
+  return '<span style="font-size:10px;color:var(--text-muted);">' + parts.map(escapeHtml).join(' | ') + '</span>';
 }
 
 function spSetItemStatus(planId, code, status) {
@@ -2633,7 +2684,7 @@ function renderStockPlanTab() {
   document.getElementById('tabBadgeSp').textContent = stockPlans.length;
 
   // 统计卡片
-  const st = spPlanStats();
+  const st = spPlanStats(onlyKey);
   const dueN = st.due;
   const statCards = [
     { label: '执行中', val: st.exe, color: '#1d4ed8', bg: '#dbeafe' },
@@ -2691,7 +2742,7 @@ function renderStockPlanTab() {
   plans.forEach(p => {
     const subject = spTopicSubject(p);
     const allEntries = Object.entries(p.items);
-    const entries = allEntries.filter(([c]) => keyMaterials.has(c)); // 只看关键物料
+    const entries = onlyKey ? allEntries.filter(([c]) => keyMaterials.has(c)) : allEntries; // 勾选只看关键物料时过滤，否则全部
     const noKeyEntry = entries.length === 0;
     const doneN = entries.filter(([, it]) => it.status === '完成').length;
     const activeN = entries.filter(([, it]) => it.status === '执行' || it.status === '延期').length;
@@ -2719,16 +2770,16 @@ function renderStockPlanTab() {
     h += stBadge;
     h += etaInfo;
     h += `<span style="font-size:10px;color:var(--text-muted);">${fmtDate(p.createdAt)}</span>`;
-    h += `<span style="margin-left:auto;font-size:10px;color:var(--text-muted);">${noKeyEntry ? '非关键' + allEntries.length + '项' : '关键' + entries.length + '项'}</span>`;
+    h += `<span style="margin-left:auto;font-size:10px;color:var(--text-muted);">${onlyKey ? (noKeyEntry ? '非关键' + allEntries.length + '项' : '关键' + entries.length + '项') : '全部' + entries.length + '项'}</span>`;
     h += `<button class="btn btn-xs btn-danger" onclick="event.stopPropagation();spDeletePlan('${p.id}')">✕</button>`;
     h += '</div>';
     if (expanded) {
       h += '<div style="padding:0 12px 10px;">';
-      if (noKeyEntry) {
+      if (onlyKey && noKeyEntry) {
         h += `<div style="font-size:11px;color:var(--text-muted);padding:8px;background:#f8fafc;border-radius:6px;margin-top:6px;">🔒 该主题无关键物料（共 ${allEntries.length} 项非关键备料），备料管理仅展示关键物料</div>`;
       } else {
         h += '<div style="display:grid;grid-template-columns:1.6fr 50px 60px 60px 90px 130px;gap:6px;padding:4px 6px;background:#f8fafc;font-weight:600;font-size:10px;color:var(--text-muted);border-radius:6px 6px 0 0;">';
-        h += '<span>物料（仅关键）</span><span>数量</span><span>状态</span><span>预计到货</span><span>在途变化</span><span>备注</span></div>';
+        h += '<span>物料' + (onlyKey ? '（仅关键）' : '') + '</span><span>数量</span><span>状态</span><span>预计到货</span><span>在途变化</span><span>备注</span></div>';
       }
       entries.forEach(([code, it]) => {
         const eta = spPlanEta(p, code);
@@ -2813,7 +2864,8 @@ function renderDashboard() {
       const dueTxt = spTopicHasDue(p) ? '<span style="color:#b91c1c;font-weight:800;"> ⚠即将到期</span>' : '';
       spBody += `<div style="border:1px solid #fecaca;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#fff5f5;cursor:pointer;" onclick="switchTab('stockplan')">
         <div style="font-size:11px;font-weight:700;">${escapeHtml(spTopicSubject(p))} <span style="color:#b91c1c;">⏳未完成 ${act.length}项</span></div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${etaTxt}${dueTxt} | ${act.map(([c]) => c).join('、')}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${spTopicMeta(p)}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${etaTxt}${dueTxt} | ${act.map(([c]) => c).join('、')}</div>
       </div>`;
     });
   }
@@ -2822,7 +2874,8 @@ function renderDashboard() {
     donePlans.forEach(p => {
       spBody += `<div style="border:1px solid #bbf7d0;border-radius:8px;padding:6px 8px;margin-bottom:6px;background:#f0fdf4;cursor:pointer;" onclick="switchTab('stockplan')">
         <div style="font-size:11px;font-weight:700;">${escapeHtml(spTopicSubject(p))} <span style="color:#166534;">✓已完成</span></div>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${Object.entries(p.items).length}项物料 | ${fmtDate(p.createdAt)}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${spTopicMeta(p)}</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:1px;">${Object.entries(p.items).length}项物料 | ${fmtDate(p.createdAt)}</div>
       </div>`;
     });
   }
