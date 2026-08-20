@@ -571,7 +571,7 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
         </div>
         <button class="btn btn-sm btn-primary" onclick="spLoadBOM()">列出第一层BOM</button>
         <button class="btn btn-sm btn-primary" onclick="spCreatePlan()">创建备料主题</button>
-        <span style="font-size:11px;color:var(--text-muted);">备料数量<b>二选一</b>：<b style="color:#9a3412;">追加备料</b>=直接采购量（如200即采购200）；<b style="color:#1e40af;">库存备料</b>=需求数量，自动按 <b>库存+在途</b> 算缺口记入<b>补货</b>（需求200、库存100、在途100→缺口0已满足，不用再备；需求200、库存100、在途0→补100），补货可直接改大（已满足也可多备）。上方「备料类型」决定<b>一键勾选/列出BOM</b>的批量填入方式，行内可逐个调整。备注"日期 型号 备料N"自动生成可改 | 备料不加入在途</span>
+        <span style="font-size:11px;color:var(--text-muted);">备料数量<b>二选一</b>：<b style="color:#9a3412;">追加备料</b>=直接采购量（如200即采购200）；<b style="color:#1e40af;">库存备料</b>=需求数量，自动按 <b>库存+在途</b> 算缺口记入<b>补货</b>（需求200、库存100、在途100→已满足，<b>自动取消备货</b>；需求200、库存100、在途0→补100）。已满足的行会提示并自动取消勾选，如需补备可<b>手动勾选</b>该行再改补货量。上方「备料类型」决定<b>一键勾选/列出BOM</b>的批量填入方式，行内可逐个调整。备注"日期 型号 备料N"自动生成可改 | 备料不加入在途</span>
       </div>
       <div id="spProductInfo" style="margin-top:6px;"></div>
       <div id="spEntryRows" style="margin-top:8px;"></div>
@@ -2678,7 +2678,7 @@ function spBatchTypeChange() {
   }
 }
 
-// 构造待备料行：bt=stock(库存备料:需求数量,自动算缺口记入补货,补货可改) / append(追加备料:直接采购量)
+// 构造待备料行：bt=stock(库存备料:需求数量,自动算缺口记入补货,补货可改；缺口0=库存+在途已满足→渲染时自动取消备货) / append(追加备料:直接采购量)
 function spRowInit(code, m, st, transit, qty, bt, subject) {
   const row = { code, name: (m && m.name) || '', spec: (m && m.spec) || '', stock: st, transit: transit, spType: bt === 'append' ? 'append' : 'stock', appendTouched: false, extra: 0 };
   if (bt === 'append') {
@@ -2689,6 +2689,15 @@ function spRowInit(code, m, st, transit, qty, bt, subject) {
   row.note = spAutoNote(subject, qty);
   row.checked = true;
   return row;
+}
+
+// 库存备料自动取消备货：库存+在途 ≥ 需求（缺口≤0）且未手动改补货、未手动保留 → 自动取消勾选
+// （手动改过补货 appendTouched、或手动勾选过 userKept 的行视为明确要备，不自动取消）
+function spAutoUncheck(r) {
+  if (r.spType !== 'stock' || !r.checked || r.appendTouched || r.userKept || !(r.qty || 0)) { r.autoUnchecked = false; return; }
+  const gap = Math.max((r.qty || 0) - (r.stock || 0) - (r.transit || 0), 0);
+  if (gap <= 0) { r.checked = false; r.autoUnchecked = true; }
+  else { r.autoUnchecked = false; }
 }
 
 // 关键物料一键勾选：按名称/规格匹配物料并加入待备料行(自动勾选)，按顶部数量+备料类型批量填入
@@ -2720,13 +2729,14 @@ function spQuickKey(label) {
   const limited = matched.slice(0, 10);
   limited.forEach(code => {
     const exist = spEntryRows.find(r => r.code === code);
-    if (exist) { exist.checked = true; return; }
+    if (exist) { exist.checked = true; exist.userKept = true; return; } // 手动勾选=明确要备，不自动取消
     const m = BOM.materials[code] || {};
     const st = getStock(code);
     spEntryRows.push(spRowInit(code, m, st, getTransit(code), qty, bt, code));
   });
   spRenderEntryRows();
-  if (result) result.innerHTML = '<span style="color:var(--success);">✓ 已一键勾选 ' + limited.length + ' 个「' + label + '」物料' + (matched.length > 10 ? '（匹配较多，仅取前10个，可取消多余）' : '') + '，按「' + (bt === 'append' ? '追加备料' : '库存备料') + '」批量填入 ' + qty + '，行内可逐个修改</span>';
+  const autoN = spEntryRows.filter(x => x.autoUnchecked).length;
+  if (result) result.innerHTML = '<span style="color:var(--success);">✓ 已一键勾选 ' + limited.length + ' 个「' + label + '」物料' + (matched.length > 10 ? '（匹配较多，仅取前10个，可取消多余）' : '') + '，按「' + (bt === 'append' ? '追加备料' : '库存备料') + '」批量填入 ' + qty + '，行内可逐个修改</span>' + (autoN > 0 ? '<span style="color:var(--success);">（其中 <b>' + autoN + '</b> 个因 库存+在途已满足需求 <b>自动取消备货</b>，如需补备请勾选对应行）</span>' : '');
 }
 
 function spLoadBOM() {
@@ -2768,6 +2778,8 @@ function spLoadBOM() {
     result.innerHTML = `<span style="color:var(--success);">✓ 已选择单独物料 ${mc}（货期: ${getLeadTime(mc) ? getLeadTime(mc) + '天' : '未匹配'}）</span>`;
   }
   spRenderEntryRows();
+  const autoN = spEntryRows.filter(x => x.autoUnchecked).length;
+  if (autoN > 0 && result) result.innerHTML += `<span style="color:var(--success);">（其中 <b>${autoN}</b> 个因 库存+在途已满足需求 <b>自动取消备货</b>，如需补备请勾选对应行）</span>`;
 }
 
 function spRenderEntryRows() {
@@ -2780,9 +2792,10 @@ function spRenderEntryRows() {
   h += '<span style="position:relative;min-width:0;">库存<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'stock\')" onclick="event.stopPropagation()"></span></span>';
   h += '<span style="position:relative;min-width:0;">在途<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'transit\')" onclick="event.stopPropagation()"></span></span>';
   h += '<span style="position:relative;min-width:0;">备料类型<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'type\')" onclick="event.stopPropagation()"></span></span>';
-  h += '<span style="position:relative;min-width:0;" title="追加=采购量(橙)；库存=需求(蓝)+补货(橙,缺口=需求-库存-在途,自动算可改)">备料数量<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'qty\')" onclick="event.stopPropagation()"></span></span>';
+  h += '<span style="position:relative;min-width:0;" title="追加=采购量(橙)；库存=需求(蓝)+补货(橙,缺口=需求-库存-在途,自动算可改)；缺口0=库存+在途已满足，自动取消备货">备料数量<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'qty\')" onclick="event.stopPropagation()"></span></span>';
   h += '<span style="position:relative;min-width:0;">备注<span class="col-resizer" onmousedown="startSpColResize(event,\'g\',\'note\')" onclick="event.stopPropagation()"></span>（自动生成，可改）</span></div>';
   spEntryRows.forEach((r, i) => {
+    spAutoUncheck(r); // 库存备料：库存+在途已满足 → 自动取消勾选（手动改过补货/手动勾选的保留）
     const isAppend = r.spType === 'append';
     const gap = Math.max((parseInt(r.qty) || 0) - (r.stock || 0) - (r.transit || 0), 0); // 缺口=需求-库存-在途
     h += '<div style="display:grid;grid-template-columns:24px var(--spg-mat,220px) var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) var(--spg-note,180px);gap:6px;padding:6px 10px;border-top:1px solid #bae6fd;font-size:11px;align-items:center;background:' + (r.alt ? '#fffbeb' : '#fff') + ';">';
@@ -2793,7 +2806,7 @@ function spRenderEntryRows() {
     // 备料类型二选一：追加备料(直接采购量) / 库存备料(需求数量，自动算缺口补货)
     h += '<span style="display:flex;gap:2px;min-width:0;">';
     h += '<span onclick="spSetType(' + i + ',\'append\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (isAppend ? 'background:#fdba74;color:#7c2d12;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="追加备料=直接采购数量（如200即采购200）">追加</span>';
-    h += '<span onclick="spSetType(' + i + ',\'stock\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (!isAppend ? 'background:#93c5fd;color:#1e3a8a;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="库存备料=需求数量，自动按 库存+在途 算缺口补货（如需求200、库存100、在途100→缺口0已满足）；补货可改大（已满足也可多备）">库存</span>';
+    h += '<span onclick="spSetType(' + i + ',\'stock\')" style="cursor:pointer;flex:1;text-align:center;padding:3px 0;border-radius:5px;font-size:10px;' + (!isAppend ? 'background:#93c5fd;color:#1e3a8a;font-weight:700;' : 'background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;') + '" title="库存备料=需求数量，自动按 库存+在途 算缺口补货（需求200、库存100、在途100→已满足自动取消备货；需求200、库存100、在途0→补100）；手动勾选/改补货=明确要备不自动取消">库存</span>';
     h += '</span>';
     // 数量输入：追加=采购量(橙单框)；库存=需求(蓝)+补货(橙，自动缺口可改)
     if (isAppend) {
@@ -2811,16 +2824,30 @@ function spRenderEntryRows() {
       h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">⚠️ 需求' + (r.qty || 0) + '-库存' + (r.stock || 0) + '-在途' + (r.transit || 0) + '=缺口 ' + gap + '，已自动记入补货（可改大）</span><span></span>';
       h += '</div>';
     } else if (!isAppend && (r.qty || 0) > 0) {
-      h += '<div style="display:grid;grid-template-columns:24px var(--spg-mat,220px) var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) var(--spg-note,180px);gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
-      h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">✓ 库存' + (r.stock || 0) + '+在途' + (r.transit || 0) + '已满足需求' + (r.qty || 0) + '，无需补货</span><span></span>';
-      h += '</div>';
+      if (r.autoUnchecked) {
+        h += '<div style="display:grid;grid-template-columns:24px var(--spg-mat,220px) var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) var(--spg-note,180px);gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
+        h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">✓ 库存' + (r.stock || 0) + '+在途' + (r.transit || 0) + '≥需求' + (r.qty || 0) + '，<b>已自动取消备货</b>（如需补备请勾选本行再改补货量）</span><span></span>';
+        h += '</div>';
+      } else {
+        h += '<div style="display:grid;grid-template-columns:24px var(--spg-mat,220px) var(--spg-stock,46px) var(--spg-transit,46px) var(--spg-type,84px) var(--spg-qty,118px) var(--spg-note,180px);gap:6px;padding:0 10px 4px;font-size:10px;color:var(--success);background:#fff;">';
+        h += '<span></span><span></span><span></span><span></span><span style="grid-column:5/7;text-align:right;">✓ 库存' + (r.stock || 0) + '+在途' + (r.transit || 0) + '已满足需求' + (r.qty || 0) + '，无需补货（已手动勾选保留，可改补货量多备）</span><span></span>';
+        h += '</div>';
+      }
     }
   });
   h += '</div>';
   c.innerHTML = h;
 }
 
-function spEntryToggle(i, checked) { if (spEntryRows[i]) spEntryRows[i].checked = checked; }
+// 手动勾选/取消：勾选=明确要备（不再自动取消），取消=放弃该行备货
+function spEntryToggle(i, checked) {
+  const r = spEntryRows[i];
+  if (!r) return;
+  r.checked = checked;
+  r.userKept = !!checked;
+  r.autoUnchecked = false;
+  spRenderEntryRows();
+}
 
 // 切换备料类型：append=追加备料(直接采购量) / stock=库存备料(需求数量，自动算缺口补货，补货可改大)
 function spSetType(i, t) {
