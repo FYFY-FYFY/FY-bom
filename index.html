@@ -762,6 +762,21 @@ body.resizing-cols, body.resizing-cols * { cursor: col-resize !important; user-s
 </div>
 
 
+<!-- 创建备料主题确认弹窗 -->
+<div class="modal-overlay" id="spTopicModal">
+  <div class="modal" style="max-width:480px;">
+    <h3>📦 创建备料主题</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">主题标识默认 = <b>物料编码 + 规格型号</b>，可直接修改（例如加「——第一次备料」），将作为该主题在备料管理中的标题</p>
+    <input type="text" id="spTopicTitleInput" placeholder="编码 规格型号" style="width:100%;padding:8px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;" onkeydown="if(event.key==='Enter')spConfirmCreatePlan()">
+    <div id="spTopicModalInfo" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></div>
+    <div class="modal-buttons">
+      <button class="btn" onclick="spCloseTopicModal()" style="background:#f1f5f9;">取消</button>
+      <button class="btn btn-primary" onclick="spConfirmCreatePlan()">创建主题</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- Deploy / 在线发布设置 -->
 <div class="modal-overlay" id="deployModal">
   <div class="modal" style="max-width:480px;">
@@ -2670,25 +2685,54 @@ function spEntryNoteChange(i, v) {
   spNoteTouched[spEntryRows[i].code] = true;
 }
 
+// 打开创建备料主题确认弹窗：默认标题=物料编码+规格型号（可修改，如"编码 规格——第一次备料"）
 function spCreatePlan() {
   // 追加备料=采购量>0；库存备料=需求量>0
   const checked = spEntryRows.filter(r => r.checked && (r.spType === 'append' ? (r.appendQty || 0) > 0 : (r.qty || 0) > 0));
   if (checked.length === 0) { showToast('请至少勾选一个物料并填写备料数量（追加备料 或 库存备料）'); return; }
   const subject = spEntryMode === 'product' ? document.getElementById('spProductCode').value.trim() : checked[0].code;
   if (!subject) { showToast('请先填写编码并列出BOM'); return; }
+  // 默认标题：编码 + 规格型号
+  let spec = '';
+  if (spEntryMode === 'product') {
+    const prod = BOM.products.find(x => x.code === subject);
+    spec = prod ? (prod.spec || '') : '';
+  } else {
+    const m = BOM.materials[subject];
+    spec = m ? (m.spec || '') : '';
+  }
+  const input = document.getElementById('spTopicTitleInput');
+  input.value = subject + (spec ? ' ' + spec : '');
+  const tot = checked.reduce((s, r) => s + (r.spType === 'append' ? (r.appendQty || 0) : (r.qty || 0)), 0);
+  document.getElementById('spTopicModalInfo').innerHTML = `共 <b>${checked.length}</b> 个物料，备料总量 <b>${tot}</b>（追加=采购量 / 库存=需求量）。创建后可在「📦 备料管理」查看并切换状态`;
+  document.getElementById('spTopicModal').classList.add('active');
+  input.focus();
+  input.select();
+}
+
+function spCloseTopicModal() {
+  document.getElementById('spTopicModal').classList.remove('active');
+}
+
+// 确认创建：用弹窗中编辑后的标题作为主题标识
+function spConfirmCreatePlan() {
+  const title = document.getElementById('spTopicTitleInput').value.trim();
+  if (!title) { showToast('主题标识不能为空'); return; }
+  const checked = spEntryRows.filter(r => r.checked && (r.spType === 'append' ? (r.appendQty || 0) > 0 : (r.qty || 0) > 0));
+  if (checked.length === 0) { spCloseTopicModal(); return; }
+  const subject = spEntryMode === 'product' ? document.getElementById('spProductCode').value.trim() : checked[0].code;
   const items = {};
   checked.forEach(r => {
     const isAppend = r.spType === 'append';
     items[r.code] = { spType: r.spType || 'stock', qty: isAppend ? 0 : (r.qty || 0), appendQty: r.appendQty || 0, extra: !isAppend ? (r.extra || 0) : 0, note: r.note || spAutoNote(subject, isAppend ? (r.appendQty || 0) : (r.qty || 0)), status: '执行', transitBaseline: getTransit(r.code), createdAt: Date.now(), updatedAt: Date.now() };
   });
-  const first = checked[0];
   const plan = {
     id: spNewId(),
     kind: spEntryMode,
     productCode: spEntryMode === 'product' ? subject : '',
     materialCode: spEntryMode === 'material' ? checked[0].code : '',
     createdAt: Date.now(),
-    title: spAutoNote(subject, first.spType === 'append' ? (first.appendQty || 0) : (first.qty || 0)),
+    title: title,
     items: items
   };
   stockPlans.push(plan);
@@ -2696,8 +2740,9 @@ function spCreatePlan() {
   spEntryRows = [];
   spNoteTouched = {};
   spRenderEntryRows();
+  spCloseTopicModal();
   const result = document.getElementById('spEntryResult');
-  if (result) result.innerHTML = `<span style="color:var(--success);">✓ 已创建备料主题「${escapeHtml(plan.title)}」，共 ${checked.length} 个物料。可在「📦 备料管理」页切换状态/查看预计到货</span>`;
+  if (result) result.innerHTML = `<span style="color:var(--success);">✓ 已创建备料主题「${escapeHtml(title)}」，共 ${checked.length} 个物料。可在「📦 备料管理」页切换状态/查看预计到货</span>`;
   showToast('备料主题已创建');
   renderStockPlanTab();
   renderKeySummary();
@@ -2725,8 +2770,10 @@ function spTopicHasDue(p) {
   return Object.entries(p.items).some(([code, it]) => spItemDue(p, code, it));
 }
 
-// 主题标题：kind=material 用物料名；product 仅用成品编码（名称不展示，型号/内部型号/商务属性在 meta 行）
+// 主题标题：新数据优先显示用户编辑过的主题标识（编码+规格型号等，创建时弹窗可改）；
+// 旧数据 title 是"日期 编码 备料N"自动格式（以日期开头）→ 回退旧逻辑（material 用物料名，product 仅编码）
 function spTopicSubject(p) {
+  if (p.title && !/^\d{4}-\d{2}-\d{2}/.test(p.title)) return p.title;
   if (p.kind === 'material' && p.materialCode) {
     const m = BOM.materials[p.materialCode];
     return p.materialCode + (m ? ' ' + m.name : '');
@@ -2734,20 +2781,22 @@ function spTopicSubject(p) {
   return p.productCode || '';
 }
 
-// 备料主题的产品补充信息：型号、内部型号、商务属性（仅展示，不参与逻辑）
+// 备料主题的补充信息：新数据标题已含规格型号 → 仅显示 内部型号、商务属性（material 显示名称）；
+// 旧数据(日期开头标题)补充显示 型号。仅展示，不参与逻辑
 function spTopicMeta(p) {
+  const isNew = p.title && !/^\d{4}-\d{2}-\d{2}/.test(p.title);
   if (p.kind === 'material' && p.materialCode) {
     const m = BOM.materials[p.materialCode];
     if (!m) return '';
     const parts = [];
-    if (m.spec) parts.push('型号:' + m.spec);
+    if (!isNew && m.spec) parts.push('型号:' + m.spec);
     if (m.name) parts.push('名称:' + m.name);
     return '<span style="font-size:10px;color:var(--text-muted);">' + parts.map(escapeHtml).join(' | ') + '</span>';
   }
   const prod = BOM.products.find(x => x.code === p.productCode);
   if (!prod) return '';
   const parts = [];
-  if (prod.spec) parts.push('型号:' + prod.spec);
+  if (!isNew && prod.spec) parts.push('型号:' + prod.spec);
   const im = internalModels[p.productCode];
   const bt = businessTraits[p.productCode];
   if (im) parts.push('内部型号:' + im);
