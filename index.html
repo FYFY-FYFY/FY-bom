@@ -4837,110 +4837,156 @@ function handleExcelUpload(event) {
   event.target.value = '';
   const overlay = document.getElementById('loadingOverlay');
   overlay.style.display = 'flex';
-  overlay.querySelector('div:last-child').textContent = '正在解析Excel...';
+  // 大文件预警：>2MB 提示用户需等待 10-30 秒，避免误以为"没反应"
+  const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+  overlay.querySelector('div:last-child').textContent =
+    sizeMB >= 2
+      ? `正在解析Excel（文件 ${sizeMB}MB，约 10-30 秒，UI 会持续刷新进度）...`
+      : '正在解析Excel...';
 
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array' });
       const sheetName = wb.SheetNames.find(n => n.includes('树形') || n.includes('BOM')) || wb.SheetNames[0];
+      if (!sheetName) {
+        overlay.style.display = 'none';
+        alert('Excel中没有任何工作表');
+        return;
+      }
       const ws = wb.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
+      if (!ws || !ws['!ref']) {
+        overlay.style.display = 'none';
+        alert('所选工作表无有效数据：' + sheetName);
+        return;
+      }
+      // 直接遍历 ws[addr] 单元格，比 sheet_to_json 快 5-10 倍；每 500 行 yield 让 loading 实时刷新
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const rowCount = range.e.r - range.s.r; // 含表头
       const newProducts = [];
       const newMaterials = {};
       const newSharedIndex = {};
       let currentProduct = null;
       let totalItems = 0;
-      const diffProducts = { added: [], removed: [], changed: [] };
-      const diffMaterials = { added: [], removed: [] };
+      const YIELD_EVERY = 500;
 
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i];
-        if (!row || !row[0]) continue;
-        const level = String(row[0]).trim();
-        const code = String(row[1] || '').trim();
-        const name = String(row[2] || '').trim();
-        const spec = String(row[3] || '').trim();
-        const attr = String(row[4] || '').trim();
-        const unit = String(row[7] || '').trim();
-        const numerator = parseFloat(row[8]) || 0;
-        const denominator = parseFloat(row[9]) || 1;
-        const stdQty = parseFloat(row[10]) || 0;
-        const itemType = String(row[11] || '').trim();
-        const actualQty = parseFloat(row[12]) || 0;
+      // 辅助：按 (r,c) 取 cell 值（空 cell 返回 ''）
+      function cellAt(r, c) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (cell == null || cell.v === undefined) return '';
+        return cell.v;
+      }
 
-        if (level === '0') {
-          currentProduct = { code, name, spec, attr, unit, items: [] };
-          newProducts.push(currentProduct);
-        } else {
-          if (!currentProduct) continue;
-          const item = { l: level, c: code, n: name, s: spec, a: attr, u: unit, nm: numerator, dn: denominator, sq: stdQty, it: itemType, aq: actualQty };
-          currentProduct.items.push(item);
-          totalItems++;
-          if (code && !newMaterials[code]) {
-            newMaterials[code] = { name, spec, attr, unit };
-          }
-          if (code) {
-            if (!newSharedIndex[code]) newSharedIndex[code] = [];
-            if (currentProduct.code && !newSharedIndex[code].includes(currentProduct.code)) {
-              newSharedIndex[code].push(currentProduct.code);
+      // 同步解析（XLSX.read 已完成），每 500 行让出主线程刷新 UI
+      const parseLoop = (startRow) => {
+        const endRow = Math.min(startRow + YIELD_EVERY, rowCount);
+        for (let i = startRow; i <= endRow; i++) {
+          if (i === 0) continue; // 跳过表头
+          const row0 = cellAt(i, 0);
+          if (row0 === '' || row0 === null || row0 === undefined) continue;
+          const level = String(row0).trim();
+          if (!level) continue;
+          const code = String(cellAt(i, 1)).trim();
+          const name = String(cellAt(i, 2)).trim();
+          const spec = String(cellAt(i, 3)).trim();
+          const attr = String(cellAt(i, 4)).trim();
+          const unit = String(cellAt(i, 7)).trim();
+          const numV = cellAt(i, 8);
+          const denV = cellAt(i, 9);
+          const stdV = cellAt(i, 10);
+          const numerator = (typeof numV === 'number') ? numV : (parseFloat(numV) || 0);
+          const denominator = (typeof denV === 'number') ? denV : (parseFloat(denV) || 1);
+          const stdQty = (typeof stdV === 'number') ? stdV : (parseFloat(stdV) || 0);
+          const itemType = String(cellAt(i, 11)).trim();
+          const actualV = cellAt(i, 12);
+          const actualQty = (typeof actualV === 'number') ? actualV : (parseFloat(actualV) || 0);
+
+          if (level === '0') {
+            currentProduct = { code, name, spec, attr, unit, items: [] };
+            newProducts.push(currentProduct);
+          } else {
+            if (!currentProduct) continue;
+            const item = { l: level, c: code, n: name, s: spec, a: attr, u: unit, nm: numerator, dn: denominator, sq: stdQty, it: itemType, aq: actualQty };
+            currentProduct.items.push(item);
+            totalItems++;
+            if (code && !newMaterials[code]) {
+              newMaterials[code] = { name, spec, attr, unit };
+            }
+            if (code) {
+              if (!newSharedIndex[code]) newSharedIndex[code] = [];
+              if (currentProduct.code && !newSharedIndex[code].includes(currentProduct.code)) {
+                newSharedIndex[code].push(currentProduct.code);
+              }
             }
           }
         }
-      }
-
-      // Diff analysis
-      const oldProdCodes = new Set(BOM.products.map(p => p.code));
-      const newProdCodes = new Set(newProducts.map(p => p.code));
-
-      // Added products
-      diffProducts.added = newProducts.filter(p => !oldProdCodes.has(p.code)).map(p => ({ code: p.code, name: p.name, items: p.items.length }));
-      // Removed products
-      diffProducts.removed = BOM.products.filter(p => !newProdCodes.has(p.code)).map(p => ({ code: p.code, name: p.name }));
-
-      // Changed products (same code, different items)
-      BOM.products.forEach(oldP => {
-        const newP = newProducts.find(p => p.code === oldP.code);
-        if (!newP) return;
-        if (oldP.name !== newP.name || oldP.spec !== newP.spec || oldP.attr !== newP.attr) {
-          diffProducts.changed.push({ code: oldP.code, name: oldP.name, oldName: oldP.name, newName: newP.name, oldSpec: oldP.spec, newSpec: newP.spec, oldAttr: oldP.attr, newAttr: newP.attr });
+        if (endRow < rowCount) {
+          // yield：让浏览器刷新 loading 文案
+          const pct = Math.round((endRow / rowCount) * 100);
+          overlay.querySelector('div:last-child').textContent = `正在解析Excel... ${pct}% (${endRow}/${rowCount} 行)`;
+          setTimeout(() => parseLoop(endRow + 1), 0);
+          return;
         }
-        // Material count diff
-        if (oldP.items.length !== newP.items.length) {
-          const already = diffProducts.changed.find(d => d.code === oldP.code);
-          if (!already) diffProducts.changed.push({ code: oldP.code, name: oldP.name, oldItems: oldP.items.length, newItems: newP.items.length });
-        }
-      });
-
-      // Material diff
-      const oldMatCodes = new Set(Object.keys(BOM.materials));
-      const newMatCodes = new Set(Object.keys(newMaterials));
-      diffMaterials.added = [...newMatCodes].filter(c => !oldMatCodes.has(c));
-      diffMaterials.removed = [...oldMatCodes].filter(c => !newMatCodes.has(c));
-      const preservedCount = [...newMatCodes].filter(c => oldMatCodes.has(c) && inventory[c]).length;
-
-      pendingExcelData = {
-        products: newProducts,
-        materials: newMaterials,
-        sharedIndex: newSharedIndex,
-        meta: {
-          totalProducts: newProducts.length,
-          totalItems,
-          totalMaterials: Object.keys(newMaterials).length,
-          sharedMaterials: Object.values(newSharedIndex).filter(v => v.length > 1).length
-        },
-        diff: { products: diffProducts, materials: diffMaterials, preservedCount }
+        // 完成：进入 diff 阶段
+        diffAndShowModal(newProducts, newMaterials, newSharedIndex, totalItems, overlay);
       };
-
-      overlay.style.display = 'none';
-      showExcelModal();
+      // 从第 1 行（跳过表头）开始
+      parseLoop(1);
+      return;
     } catch(err) {
       overlay.style.display = 'none';
-      alert('Excel解析失败: ' + err.message);
+      alert('Excel解析失败: ' + (err && err.message ? err.message : err));
     }
   };
+  reader.onerror = function() {
+    overlay.style.display = 'none';
+    alert('文件读取失败');
+  };
   reader.readAsArrayBuffer(file);
+}
+
+// Diff + 弹窗（从 handleExcelUpload 拆出，便于分块解析完成后调用）
+function diffAndShowModal(newProducts, newMaterials, newSharedIndex, totalItems, overlay) {
+  const diffProducts = { added: [], removed: [], changed: [] };
+  const diffMaterials = { added: [], removed: [] };
+
+  const oldProdCodes = new Set(BOM.products.map(p => p.code));
+  const newProdCodes = new Set(newProducts.map(p => p.code));
+  diffProducts.added = newProducts.filter(p => !oldProdCodes.has(p.code)).map(p => ({ code: p.code, name: p.name, items: p.items.length }));
+  diffProducts.removed = BOM.products.filter(p => !newProdCodes.has(p.code)).map(p => ({ code: p.code, name: p.name }));
+  BOM.products.forEach(oldP => {
+    const newP = newProducts.find(p => p.code === oldP.code);
+    if (!newP) return;
+    if (oldP.name !== newP.name || oldP.spec !== newP.spec || oldP.attr !== newP.attr) {
+      diffProducts.changed.push({ code: oldP.code, name: oldP.name, oldName: oldP.name, newName: newP.name, oldSpec: oldP.spec, newSpec: newP.spec, oldAttr: oldP.attr, newAttr: newP.attr });
+    }
+    if (oldP.items.length !== newP.items.length) {
+      const already = diffProducts.changed.find(d => d.code === oldP.code);
+      if (!already) diffProducts.changed.push({ code: oldP.code, name: oldP.name, oldItems: oldP.items.length, newItems: newP.items.length });
+    }
+  });
+  const oldMatCodes = new Set(Object.keys(BOM.materials));
+  const newMatCodes = new Set(Object.keys(newMaterials));
+  diffMaterials.added = [...newMatCodes].filter(c => !oldMatCodes.has(c));
+  diffMaterials.removed = [...oldMatCodes].filter(c => !newMatCodes.has(c));
+  const preservedCount = [...newMatCodes].filter(c => oldMatCodes.has(c) && inventory[c]).length;
+
+  pendingExcelData = {
+    products: newProducts,
+    materials: newMaterials,
+    sharedIndex: newSharedIndex,
+    meta: {
+      totalProducts: newProducts.length,
+      totalItems,
+      totalMaterials: Object.keys(newMaterials).length,
+      sharedMaterials: Object.values(newSharedIndex).filter(v => v.length > 1).length
+    },
+    diff: { products: diffProducts, materials: diffMaterials, preservedCount }
+  };
+
+  overlay.style.display = 'none';
+  showExcelModal();
 }
 
 function showExcelModal() {
